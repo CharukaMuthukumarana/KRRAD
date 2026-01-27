@@ -1,0 +1,48 @@
+# monitor/daemonset.yaml
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: krrad-sensor
+  namespace: kube-system  # We run in system namespace to monitor everything
+spec:
+  selector:
+    matchLabels:
+      app: krrad-sensor
+  template:
+    metadata:
+      labels:
+        app: krrad-sensor
+    spec:
+      # CRITICAL: eBPF requires the container to share the host's network and PID namespace
+      hostNetwork: true
+      hostPID: true
+      containers:
+      - name: sensor
+        image: krrad-sensor:latest
+        imagePullPolicy: Never  # Use the local image we build in Minikube
+        ports:
+        - containerPort: 5000
+          name: api
+          hostPort: 5000
+        securityContext:
+          privileged: true  # Required to load kernel modules
+        volumeMounts:
+        # We must mount the Kernel headers and BPF filesystem
+        - name: lib-modules
+          mountPath: /lib/modules
+          readOnly: true
+        - name: sys-fs-bpf
+          mountPath: /sys/fs/bpf
+        - name: usr-src
+          mountPath: /usr/src
+          readOnly: true
+      volumes:
+      - name: lib-modules
+        hostPath:
+          path: /lib/modules
+      - name: sys-fs-bpf
+        hostPath:
+          path: /sys/fs/bpf
+      - name: usr-src
+        hostPath:
+          path: /usr/src

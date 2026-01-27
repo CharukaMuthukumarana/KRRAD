@@ -1,0 +1,51 @@
+# controller/deployment.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: krrad-admin
+  namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: krrad-admin-binding
+subjects:
+- kind: ServiceAccount
+  name: krrad-admin
+  namespace: default
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: krrad-controller
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: krrad-controller
+  template:
+    metadata:
+      labels:
+        app: krrad-controller
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+    spec:
+      serviceAccountName: krrad-admin
+      containers:
+      - name: controller
+        image: krrad-controller:latest
+        imagePullPolicy: Never
+        # --- FIXED: Added Resource Limits ---
+        resources:
+          requests:
+            memory: "256Mi"  # Minimum RAM required
+            cpu: "250m"      # 0.25 CPU Core
+          limits:
+            memory: "512Mi"  # Maximum RAM allowed
+            cpu: "500m"      # 0.5 CPU Core

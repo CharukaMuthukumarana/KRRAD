@@ -1,0 +1,32 @@
+# 1. Create a Service to expose the Controller's metrics
+apiVersion: v1
+kind: Service
+metadata:
+  name: krrad-controller-metrics
+  labels:
+    app: krrad-controller
+spec:
+  selector:
+    app: krrad-controller
+  ports:
+    - name: metrics
+      port: 8000
+      targetPort: 8000
+      protocol: TCP
+---
+# 2. Create a ServiceMonitor to tell Prometheus to scrape it
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: krrad-controller-monitor
+  labels:
+    # This label is CRITICAL. It tells the Helm chart "This is yours"
+    release: monitoring 
+spec:
+  selector:
+    matchLabels:
+      app: krrad-controller
+  endpoints:
+    - port: metrics
+      interval: 1s  # Scrape every second for real-time updates
+      path: /

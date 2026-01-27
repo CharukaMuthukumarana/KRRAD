@@ -1,0 +1,13 @@
+# monitor/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: krrad-sensor
+  namespace: kube-system
+spec:
+  selector:
+    app: krrad-sensor
+  ports:
+    - protocol: TCP
+      port: 5000
+      targetPort: 5000

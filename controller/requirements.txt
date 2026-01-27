@@ -1,0 +1,8 @@
+requests
+joblib
+pandas
+numpy
+kubernetes
+torch
+scikit-learn
+prometheus_client
