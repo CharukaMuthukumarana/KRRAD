@@ -2,62 +2,84 @@
 from bcc import BPF
 from flask import Flask, jsonify, request
 import sys
-import threading
-import time
-import socket
-import struct
+import os
 
-# Initialize Flask
 app = Flask(__name__)
 
+# --- CONFIG ---
+device = os.environ.get("INTERFACE", "eth0")
+xdp_mode = os.environ.get("XDP_MODE", "auto")
+print(f"--- KRRAD SENSOR ---")
+print(f"Interface: {device} | Mode: {xdp_mode}")
+
+flags = 0
+if xdp_mode == "skb":
+    print("Forcing Generic Mode (SKB)...")
+    flags = (1 << 1)
+
 # Load eBPF
-device = "eth0"
-print(f"Loading eBPF program on {device}...")
 try:
     b = BPF(src_file="/app/src/xdp_counter.c")
     fn = b.load_func("xdp_prog", BPF.XDP)
-    b.attach_xdp(device, fn, 0)
-    print("eBPF Attached Successfully.")
+    
+    # Auto-cleanup zombies
+    print(f"🧹 Cleaning up {device}...")
+    try: b.remove_xdp(device, flags)
+    except: pass
+    
+    b.attach_xdp(device, fn, flags)
+    print("✅ eBPF Attached. Counting REAL bytes.")
 except Exception as e:
-    print(f"CRITICAL ERROR: {e}")
+    print(f"❌ ERROR: {e}")
     sys.exit(1)
 
-# Helper: Convert IP string to int
 def ip_to_int(ip_str):
+    import socket, struct
     return struct.unpack("!I", socket.inet_aton(ip_str))[0]
 
 @app.route('/metrics', methods=['GET'])
 def get_metrics():
-    # Read from kernel map
+    # Read the struct from the kernel map
     data = {}
-    for k, v in b["packet_counts"].items():
+    total_packets = 0
+    total_bytes = 0
+    
+    for k, v in b["metrics_map"].items():
+        # Map protocol number to name
         proto = "TCP" if k.value == 6 else "UDP" if k.value == 17 else str(k.value)
-        data[proto] = v.value
-    return jsonify(data)
+        
+        # v.packets and v.bytes come from the C struct
+        data[proto] = {
+            "packets": v.packets,
+            "bytes": v.bytes
+        }
+        total_packets += v.packets
+        total_bytes += v.bytes
+
+    # Return aggregated totals for the Controller
+    response = {
+        "packets": total_packets,
+        "bytes": total_bytes,
+        "details": data
+    }
+    return jsonify(response)
 
 @app.route('/block', methods=['POST'])
 def block_ip():
-    # Add IP to blacklist map
     ip = request.json.get('ip')
-    if not ip:
-        return jsonify({"error": "No IP provided"}), 400
-    
+    if not ip: return jsonify({"error": "No IP"}), 400
     ip_int = ip_to_int(ip)
-    # 1 = Drop
     b["blacklist"][b["blacklist"].Key(ip_int)] = b["blacklist"].Leaf(1)
-    print(f"BLOCKED IP: {ip}")
+    print(f"🚫 BLOCKED: {ip}")
     return jsonify({"status": "blocked", "ip": ip})
 
 @app.route('/unblock', methods=['POST'])
 def unblock_ip():
     ip = request.json.get('ip')
-    ip_int = ip_to_int(ip)
-    try:
-        del b["blacklist"][b["blacklist"].Key(ip_int)]
-    except:
-        pass
+    if not ip: return jsonify({"error": "No IP"}), 400
+    try: del b["blacklist"][b["blacklist"].Key(ip_to_int(ip))]
+    except: pass
     return jsonify({"status": "unblocked", "ip": ip})
 
 if __name__ == '__main__':
-    # Run API on port 5000
     app.run(host='0.0.0.0', port=5000)

@@ -20,12 +20,17 @@ preds = rf_model.predict(X_test)
 print(f"RF Accuracy: {accuracy_score(y_test, preds)}")
 
 # --- MODEL 2: ISOLATION FOREST (The Anomaly Hunter) ---
-print("Training Isolation Forest (Baseline Learner)...")
-# We train ONLY on "Benign" (Normal) traffic to teach it what 'Normal' looks like
-normal_traffic = df[df['Label'] == 0].drop(columns=['Label'])
+silence_df = pd.DataFrame(0, index=range(5000), columns=df.columns)
+silence_df['Label'] = 0 # Mark as Safe
 
-iso_forest = IsolationForest(n_estimators=100, contamination=0.1, random_state=42)
-iso_forest.fit(normal_traffic)
+# We train ONLY on "Benign" (Normal) traffic to teach it what 'Normal' looks like
+normal_traffic = df[df['Label'] == 0]
+training_data = pd.concat([normal_traffic, silence_df], ignore_index=True).drop(columns=['Label'])
+
+print("Training Isolation Forest (with Silence Baseline)...")
+# Reduced contamination to 0.01 (1%) so it trusts almost everything as normal
+iso_forest = IsolationForest(n_estimators=100, contamination=0.01, random_state=42)
+iso_forest.fit(training_data)
 
 # 3. Save Both Models
 joblib.dump(rf_model, 'ml_engine/models/traffic_classifier.pkl')
