@@ -11,6 +11,7 @@ warnings.filterwarnings("ignore", category=UserWarning)
 
 # --- PROMETHEUS METRICS ---
 PPS_GAUGE = Gauge('krrad_traffic_pps', 'Current Packets Per Second')
+BPS_GAUGE = Gauge('krrad_traffic_bps', 'Current Bytes Per Second')
 # Status: 0=Safe, 1=Confirmed Attack, 2=Suspicious (Anomaly)
 ATTACK_GAUGE = Gauge('krrad_attack_status', 'System Threat Status')
 CONFIDENCE_GAUGE = Gauge('krrad_ai_confidence', 'Ensemble Confidence Score')
@@ -132,5 +133,6 @@ while True:
 
     # Update Dashboard
     PPS_GAUGE.set(pps)
+    BPS_GAUGE.set(bps)
     ATTACK_GAUGE.set(final_status)
     CONFIDENCE_GAUGE.set(dnn_conf)
