@@ -4,23 +4,29 @@ import joblib
 import torch
 import torch.nn as nn
 import numpy as np
+import subprocess
+import datetime
 from prometheus_client import start_http_server, Gauge
 import warnings
-# Silence the "feature names" warning from sklearn
-warnings.filterwarnings("ignore", category=UserWarning)
+import os
 
-# --- PROMETHEUS METRICS ---
+warnings.filterwarnings("ignore")
+
+# Prometheus Metrics
 PPS_GAUGE = Gauge('krrad_traffic_pps', 'Current Packets Per Second')
 BPS_GAUGE = Gauge('krrad_traffic_bps', 'Current Bytes Per Second')
-# Status: 0=Safe, 1=Confirmed Attack, 2=Suspicious (Anomaly)
 ATTACK_GAUGE = Gauge('krrad_attack_status', 'System Threat Status')
 CONFIDENCE_GAUGE = Gauge('krrad_ai_confidence', 'Ensemble Confidence Score')
+ACTION_GAUGE = Gauge('krrad_mitigation_action', 'RL Action Taken (0=Wait, 1=Block, 2=Scale)')
 
-# --- CONFIG ---
+# Configuration
 SENSOR_URL = "http://krrad-sensor.kube-system:5000"
 MODELS_DIR = "/app/models"
+SCALING_TARGET = "deployment/krrad-sensor"
+NAMESPACE = "kube-system"
+COOLDOWN_SECONDS = 30
 
-# --- DEFINE DEEP LEARNING MODEL CLASS ---
+# Deep Learning Model
 class KRRAD_DNN(nn.Module):
     def __init__(self, input_dim):
         super(KRRAD_DNN, self).__init__()
@@ -32,106 +38,160 @@ class KRRAD_DNN(nn.Module):
     def forward(self, x):
         return self.sigmoid(self.output(self.layer3(self.layer2(self.layer1(x)))))
 
-# --- LOAD THE ENSEMBLE ---
-print("Initializing KRRAD Multi-Model Ensemble...")
+# RL Agent
+class DQN(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super(DQN, self).__init__()
+        self.fc = nn.Sequential(
+            nn.Linear(input_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, 64),
+            nn.ReLU(),
+            nn.Linear(64, output_dim)
+        )
+    def forward(self, x):
+        return self.fc(x)
+
+# Initialize AI Core
+print("Initializing KRRAD AI Core...")
 try:
-    # 1. Load Scaler (Required for DNN)
     scaler = joblib.load(f'{MODELS_DIR}/scaler.pkl')
     
-    # 2. Load Deep Learning Model (DNN)
     dnn_model = KRRAD_DNN(input_dim=4)
-    dnn_model.load_state_dict(torch.load(f'{MODELS_DIR}/lstm_model.pth', map_location=torch.device('cpu')))
+    dnn_model.load_state_dict(torch.load(f'{MODELS_DIR}/dnn_model.pth', map_location='cpu'))
     dnn_model.eval()
     
-    # 3. Load Random Forest (RF)
     rf_model = joblib.load(f'{MODELS_DIR}/rf_model_big.pkl')
-    
-    # 4. Load Isolation Forest (ISO)
     iso_model = joblib.load(f'{MODELS_DIR}/iso_model_big.pkl')
     
-    print("✅ ENSEMBLE LOADED: [DNN + Random Forest + Isolation Forest]")
+    rl_agent = DQN(input_dim=4, output_dim=3)
+    rl_agent.load_state_dict(torch.load(f'{MODELS_DIR}/dqn_agent.pth', map_location='cpu'))
+    rl_agent.eval()
+    
+    print("✅ AI Ensemble and RL Agent loaded successfully.")
 except Exception as e:
-    print(f"❌ CRITICAL LOAD ERROR: {e}")
+    print(f"❌ Critical Error Loading Models: {e}")
     exit(1)
 
-def get_traffic_stats():
-    try:
-        r = requests.get(f"{SENSOR_URL}/metrics", timeout=1)
-        return r.json()
-    except:
-        return None
+# Mitigation Logic
+last_action_time = datetime.datetime.now()
 
-# --- MAIN LOOP ---
+def execute_mitigation(action, pps):
+    global last_action_time
+    ACTION_GAUGE.set(action)
+    
+    if action == 0:
+        return "MONITORING"
+        
+    if (datetime.datetime.now() - last_action_time).seconds < COOLDOWN_SECONDS:
+        return "COOLDOWN"
+        
+    if action == 1:
+        print(f"🛡️ RL Decision: Block Attack Signature (PPS: {pps})")
+        last_action_time = datetime.datetime.now()
+        return "BLOCKING"
+        
+    elif action == 2:
+        print(f"⚖️ RL Decision: Scaling Resources (PPS: {pps})")
+        try:
+            subprocess.run(["kubectl", "scale", SCALING_TARGET, "--replicas=5", "-n", NAMESPACE], check=False)
+        except Exception as e:
+            print(f"Scaling Error: {e}")
+        last_action_time = datetime.datetime.now()
+        return "SCALING"
+
+def get_sensor_data_blocking():
+    while True:
+        try:
+            r = requests.get(f"{SENSOR_URL}/metrics", timeout=2)
+            if r.status_code == 200:
+                return r.json()
+        except:
+            print("⏳ Waiting for Sensor connection...")
+        time.sleep(2)
+
+# Main Execution Loop
 start_http_server(8000)
-print("🚀 Controller Running with Ensemble Logic...")
+print("🚀 KRRAD Controller Live. Establishing Baseline...")
 
-last_packets = 0
-last_bytes = 0
+# Initialize Baseline
+baseline_data = get_sensor_data_blocking()
+last_packets = baseline_data.get('packets', 0)
+last_bytes = baseline_data.get('bytes', 0)
+last_time = time.monotonic()
+
+print("✅ Baseline Established. Monitoring Active.")
 
 while True:
     time.sleep(1)
     
-    data = get_traffic_stats()
-    if not data: continue
-    
-    # 1. Calculate Live Metrics
+    try:
+        data = requests.get(f"{SENSOR_URL}/metrics", timeout=1).json()
+    except:
+        continue
+
+    curr_time = time.monotonic()
     curr_packets = data.get('packets', 0)
     curr_bytes = data.get('bytes', 0)
     
-    pps = max(0, curr_packets - last_packets)
-    bps = max(0, curr_bytes - last_bytes)
+    # Calculate Deltas
+    dt = curr_time - last_time
+    if dt <= 0: continue
+    
+    pps = int((curr_packets - last_packets) / dt)
+    bps = int((curr_bytes - last_bytes) / dt)
     
     last_packets = curr_packets
     last_bytes = curr_bytes
+    last_time = curr_time
     
-    # 2. Feature Engineering (Must match training data!)
-    # [PPS, Bytes, Packets, Avg_Size]
+    # AI Inference
     avg_packet_size = 0 if pps == 0 else bps / pps
-    
-    # Raw features for RF and ISO
     features_raw = [[pps, bps, pps, avg_packet_size]]
-    
-    # Scaled features for DNN
     features_scaled = scaler.transform(features_raw)
     features_tensor = torch.tensor(features_scaled, dtype=torch.float32)
     
-    # --- 3. GET VOTES FROM ALL MODELS ---
-    
-    # Vote A: Deep Neural Network (0.0 to 1.0)
     with torch.no_grad():
         dnn_conf = dnn_model(features_tensor).item()
-        
-    # Vote B: Random Forest (0 or 1)
     rf_pred = rf_model.predict(features_raw)[0]
-    
-    # Vote C: Isolation Forest (1=Normal, -1=Anomaly)
     iso_pred = iso_model.predict(features_raw)[0]
-    iso_is_anomaly = (iso_pred == -1)
     
-    # --- 4. THE CONSENSUS LOGIC ---
-    
-    final_status = 0 # Default Safe
-    
-    # LOGIC 1: Confirmed Attack (Both Supervised Models Agree)
+    # Consensus Engine
+    final_status = 0
     if rf_pred == 1 and dnn_conf > 0.8:
-        print(f"🚨 CONFIRMED ATTACK! (RF: Attack | DNN: {dnn_conf:.2f})")
         final_status = 1
-        
-    # LOGIC 2: High Probability (DNN is very sure, even if RF missed)
     elif dnn_conf > 0.95:
-        print(f"⚠️ HIGH THREAT (DNN Confidence: {dnn_conf:.2f})")
         final_status = 1
-        
-    # LOGIC 3: Suspicious / Zero-Day (Models say safe, but IsoForest sees anomaly)
-    elif iso_is_anomaly and pps > 100: # Ignore anomalies if traffic is tiny
-        print(f"👀 SUSPICIOUS ANOMALY (Zero-Day Potential?)")
-        final_status = 2 
-        
-    else:
-        print(f"✅ Safe Traffic (PPS: {pps} | Size: {avg_packet_size:.1f}B)")
-        final_status = 0
+    elif iso_pred == -1 and pps > 100:
+        final_status = 2
+    
+    # Reinforcement Learning Step
+    norm_pps = min(1.0, pps / 100000)
+    norm_bps = min(1.0, bps / 10000000)
+    est_cpu = min(1.0, pps / 50000)
+    norm_attack = 1.0 if final_status > 0 else 0.0
+    
+    state = torch.tensor([[norm_pps, norm_bps, est_cpu, norm_attack]], dtype=torch.float32)
+    with torch.no_grad():
+        action = torch.argmax(rl_agent(state)).item()
 
-    # Update Dashboard
+    if pps < 100:
+        action = 0
+    
+    # Safety Override
+    if final_status >= 1 and action == 0:
+        action = 1
+    
+    mitigation = execute_mitigation(action, pps)
+
+    # Logging
+    status_text = {0: "SAFE", 1: "ATTACK", 2: "SUSPICIOUS"}.get(final_status, "UNKNOWN")
+    
+    if final_status > 0:
+        print(f"🚨 {status_text} (PPS: {pps}) | Action: {mitigation}")
+    else:
+        print(f"✅ {status_text} (PPS: {pps}) | Action: MONITORING")
+        
     PPS_GAUGE.set(pps)
     BPS_GAUGE.set(bps)
     ATTACK_GAUGE.set(final_status)
