@@ -39,9 +39,14 @@ spec:
       serviceAccountName: krrad-admin
       containers:
       - name: controller
-        image: krrad-controller:latest
-        imagePullPolicy: Never
+        image: charuka2002/krrad-controller:v1.1
+        imagePullPolicy: Always
         # --- FIXED: Added Resource Limits ---
+        ports:
+        - containerPort: 8000
+        env:
+        - name: SENSOR_URL
+          value: "http://10.103.68.214:5000"
         resources:
           requests:
             memory: "256Mi"  # Minimum RAM required

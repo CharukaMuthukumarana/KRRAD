@@ -1,40 +1,29 @@
 #!/bin/bash
-set -e # Exit if any command fails
+set -e # Exit immediately if a command exits with a non-zero status
 
 echo "========================================"
-echo "   🚀 KRRAD System Launch Sequence      "
+echo "   🚀 Launching KRRAD Production (Cloud Mode)"
 echo "========================================"
 
-# 1. Smart Minikube Check
-echo "[1/5] Checking Minikube Status..."
+# 1. Check Minikube
+echo "[1/3] Ensuring Cluster is Active..."
 if minikube status --format='{{.Host}}' | grep -q "Running"; then
-    echo "      ✅ Minikube is already running."
-    echo "      🔄 Refreshing connection (fixing TLS)..."
-    minikube update-context > /dev/null
+    echo "      ✅ Minikube is running."
 else
-    echo "      🔻 Minikube is stopped. Starting (may download image)..."
-    minikube start
+    echo "      🔻 Minikube is stopped. Starting..."
+    # We use the 'none' driver for Cloud VMs (Bare Metal)
+    sudo minikube start --driver=none
+    
+    # Fix permissions immediately after start
+    sudo chown -R $USER $HOME/.kube $HOME/.minikube
+    sed -i "s|/root|/home/$USER|g" $HOME/.kube/config
 fi
 
-# 2. Configure Docker Environment
-echo "[2/5] Configuring Docker Env..."
-eval $(minikube -p minikube docker-env)
-
-# 3. Build Docker Images
-echo "[3/5] Building Docker Images..."
-echo "      Building Sensor (eBPF)..."
-docker build -t krrad-sensor:latest -f monitor/Dockerfile monitor/ > /dev/null
-echo "      Building Controller (AI Brain)..."
-docker build -t krrad-controller:latest -f controller/Dockerfile controller/ > /dev/null
-
-# 4. Deploy to Kubernetes
-echo "[4/5] Deploying Resources..."
-
-# Deploy Sensor
+# 2. Deploy Resources
+# Kubernetes will now download your 'charuka2002/...' images from Docker Hub automatically.
+echo "[2/3] Deploying Resources..."
 kubectl apply -f monitor/service.yaml
 kubectl apply -f monitor/daemonset.yaml
-
-# Deploy Controller
 kubectl apply -f controller/deployment.yaml
 
 # Deploy Monitoring Stack (if it exists)
@@ -42,11 +31,20 @@ if [ -f "controller/monitoring.yaml" ]; then
     kubectl apply -f controller/monitoring.yaml
 fi
 
-# 5. Grant Permissions
-echo "[5/5] Configuring Permissions..."
+# 3. Permissions
+echo "[3/3] Configuring Permissions..."
 kubectl create clusterrolebinding krrad-admin-default --clusterrole=cluster-admin --serviceaccount=default:default --dry-run=client -o yaml | kubectl apply -f -
 
 echo "========================================"
-echo "✅ KRRAD System is LIVE!"
-echo "   Monitor Logs: kubectl logs -f -l app=krrad-controller"
+echo "✅ System Launch Initiated."
+echo "   Wait 60s, then check status: kubectl get pods"
 echo "========================================"
+
+echo "🌍 Exposing Grafana..."
+# Ensure the service exists first (it might take a second after helm install)
+kubectl patch svc monitoring-grafana -p '{"spec": {"type": "NodePort"}}' || true
+
+# Print the URL for you
+NODE_PORT=$(kubectl get svc monitoring-grafana -o=jsonpath='{.spec.ports[0].nodePort}')
+EXT_IP=$(curl -s ifconfig.me)
+echo "✅ Grafana is available at: http://$EXT_IP:$NODE_PORT"

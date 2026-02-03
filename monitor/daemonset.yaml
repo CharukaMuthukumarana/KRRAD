@@ -18,8 +18,11 @@ spec:
       hostPID: true
       containers:
       - name: sensor
-        image: krrad-sensor:latest
-        imagePullPolicy: Never  # Use the local image we build in Minikube
+        image: charuka2002/krrad-sensor:v1.3
+        imagePullPolicy: Always  # Use the local image we build in Minikube
+        env:
+        - name: INTERFACE
+          value: "ens4"
         ports:
         - containerPort: 5000
           name: api
