@@ -1,28 +1,9 @@
-# controller/deployment.yaml
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: krrad-admin
-  namespace: default
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: krrad-admin-binding
-subjects:
-- kind: ServiceAccount
-  name: krrad-admin
-  namespace: default
-roleRef:
-  kind: ClusterRole
-  name: cluster-admin
-  apiGroup: rbac.authorization.k8s.io
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: krrad-controller
-  namespace: default
+  labels:
+    app: krrad-controller
 spec:
   replicas: 1
   selector:
@@ -32,25 +13,16 @@ spec:
     metadata:
       labels:
         app: krrad-controller
-      annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/port: "8000"
     spec:
-      serviceAccountName: krrad-admin
+      serviceAccountName: krrad-controller-sa
       containers:
       - name: controller
-        image: charuka2002/krrad-controller:v1.1
-        imagePullPolicy: Always
-        # --- FIXED: Added Resource Limits ---
-        ports:
-        - containerPort: 8000
+        image: charuka2002/krrad-controller:4.1-rc  # Ensure this matches your latest build
+        imagePullPolicy: IfNotPresent
         env:
         - name: SENSOR_URL
-          value: "http://10.103.68.214:5000"
-        resources:
-          requests:
-            memory: "256Mi"  # Minimum RAM required
-            cpu: "250m"      # 0.25 CPU Core
-          limits:
-            memory: "512Mi"  # Maximum RAM allowed
-            cpu: "500m"      # 0.5 CPU Core
+          value: "http://krrad-sensor.kube-system.svc.cluster.local:5000"
+        - name: PROMETHEUS_URL
+          value: "http://prometheus-service.monitoring.svc.cluster.local:9090"
+        ports:
+        - containerPort: 8080

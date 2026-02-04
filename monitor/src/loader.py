@@ -2,6 +2,7 @@ from bcc import BPF
 from flask import Flask, jsonify, request
 import sys
 import os
+import socket, struct
 
 app = Flask(__name__)
 
@@ -52,10 +53,23 @@ def get_metrics():
         total_packets += v.packets
         total_bytes += v.bytes
 
+    max_packets = 0
+    top_ip_str = None
+    
+    # Iterate over the IP Tracker map
+    for k, v in b["ip_tracker"].items():
+        if v.value > max_packets:
+            max_packets = v.value
+            # Convert integer IP back to string 
+            top_ip_str = socket.inet_ntoa(struct.pack("<I", k.value))
+
+    # b["ip_tracker"].clear()
+
     return jsonify({
         "packets": total_packets,
         "bytes": total_bytes,
-        "details": details
+        "details": details,
+        "top_source_ip": top_ip_str
     })
 
 @app.route('/block', methods=['POST'])
@@ -63,9 +77,20 @@ def block_ip():
     ip = request.json.get('ip')
     if not ip: return jsonify({"error": "No IP"}), 400
     
-    ip_int = ip_to_int(ip)
-    b["blacklist"][b["blacklist"].Key(ip_int)] = b["blacklist"].Leaf(1)
-    print(f"Blocked IP: {ip}")
+    # 1. Block Little Endian (Host Order)
+    try:
+        ip_le = struct.unpack("<I", socket.inet_aton(ip))[0]
+        b["blacklist"][b["blacklist"].Key(ip_le)] = b["blacklist"].Leaf(1)
+    except: pass
+
+    # 2. Block Big Endian (Network Order)
+    try:
+        ip_be = struct.unpack("!I", socket.inet_aton(ip))[0]
+        b["blacklist"][b["blacklist"].Key(ip_be)] = b["blacklist"].Leaf(1)
+    except: pass
+    
+    # LOOK FOR THIS MESSAGE IN LOGS LATER
+    print(f"⛔ Blocked IP: {ip} (Registered in LE and BE)")
     return jsonify({"status": "blocked", "ip": ip})
 
 @app.route('/unblock', methods=['POST'])

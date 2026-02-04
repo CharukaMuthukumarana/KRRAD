@@ -2,3 +2,12 @@ venv/
 ml_engine/models/
 ml_engine/raw_data/
 ml_engine/data
+
+__pycache__/
+*.py[cod]
+*$py.class
+
+# OS specific
+.DS_Store
+.vscode/
+.idea/
