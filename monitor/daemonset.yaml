@@ -3,7 +3,7 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: krrad-sensor
-  namespace: kube-system  # We run in system namespace to monitor everything
+  namespace: kube-system
 spec:
   selector:
     matchLabels:
@@ -13,36 +13,56 @@ spec:
       labels:
         app: krrad-sensor
     spec:
-      # CRITICAL: eBPF requires the container to share the host's network and PID namespace
       hostNetwork: true
       hostPID: true
       containers:
       - name: sensor
-        image: krrad-sensor:latest
-        imagePullPolicy: Never  # Use the local image we build in Minikube
-        ports:
-        - containerPort: 5000
-          name: api
-          hostPort: 5000
+        image: charuka2002/krrad-sensor:v2.0-rc
+        imagePullPolicy: IfNotPresent
         securityContext:
-          privileged: true  # Required to load kernel modules
+          privileged: true
+        env:
+        - name: INTERFACE
+          value: "bridge"
+        # --- Manual Startup Command ---
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -e
+          echo "🔧 Manual Setup: Linking Kernel Headers..."
+          
+          # 1. Identify the running kernel
+          CURRENT_KERNEL=$(uname -r)
+          echo "   Host Kernel: $CURRENT_KERNEL"
+          
+          # 2. Find the headers we installed in the image
+          # (We look for any generic headers directory in /usr/src)
+          INSTALLED_HEADERS=$(find /usr/src -maxdepth 1 -name "linux-headers-*-generic" -type d | head -n 1)
+          
+          if [ -z "$INSTALLED_HEADERS" ]; then
+             echo "❌ CRITICAL: No linux-headers found in /usr/src!"
+             echo "   Did the Docker build (v1.5) actually succeed?"
+             ls -l /usr/src
+             exit 1
+          fi
+          
+          echo "   Found Headers: $INSTALLED_HEADERS"
+          
+          # 3. Create the Symlink
+          mkdir -p /lib/modules/$CURRENT_KERNEL
+          rm -f /lib/modules/$CURRENT_KERNEL/build
+          ln -s $INSTALLED_HEADERS /lib/modules/$CURRENT_KERNEL/build
+          echo "✅ Symlink created."
+          
+          # 4. Start the Sensor
+          echo "🚀 Starting KRRAD Sensor..."
+          python3 src/loader.py
+        
         volumeMounts:
-        # We must mount the Kernel headers and BPF filesystem
-        - name: lib-modules
-          mountPath: /lib/modules
-          readOnly: true
         - name: sys-fs-bpf
           mountPath: /sys/fs/bpf
-        - name: usr-src
-          mountPath: /usr/src
-          readOnly: true
       volumes:
-      - name: lib-modules
-        hostPath:
-          path: /lib/modules
       - name: sys-fs-bpf
         hostPath:
           path: /sys/fs/bpf
-      - name: usr-src
-        hostPath:
-          path: /usr/src
