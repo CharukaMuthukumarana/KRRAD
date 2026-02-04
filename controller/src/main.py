@@ -4,11 +4,13 @@ import joblib
 import torch
 import torch.nn as nn
 import numpy as np
-import subprocess
 import datetime
 from prometheus_client import start_http_server, Gauge
 import warnings
 import os
+import socket
+import struct
+from kubernetes import client, config
 
 warnings.filterwarnings("ignore")
 
@@ -22,9 +24,10 @@ ACTION_GAUGE = Gauge('krrad_mitigation_action', 'RL Action Taken (0=Wait, 1=Bloc
 # Configuration
 SENSOR_URL = "http://krrad-sensor.kube-system:5000"
 MODELS_DIR = "/app/models"
-SCALING_TARGET = "deployment/krrad-sensor"
-NAMESPACE = "kube-system"
+SCALING_TARGET = "krrad-target"
+NAMESPACE = "default"
 COOLDOWN_SECONDS = 30
+IS_SCALED_UP = False
 
 # Deep Learning Model
 class KRRAD_DNN(nn.Module):
@@ -52,89 +55,148 @@ class DQN(nn.Module):
     def forward(self, x):
         return self.fc(x)
 
+print("🔌 Connecting to Kubernetes Cluster...")
+try:
+    config.load_incluster_config()
+    k8s_apps_v1 = client.AppsV1Api()
+    print("✅ Kubernetes Client Connected.")
+except Exception as e:
+    print(f"⚠️ Warning: K8s Connection Failed: {e}")
+    k8s_apps_v1 = None
+
 # Initialize AI Core
 print("Initializing KRRAD AI Core...")
 try:
     scaler = joblib.load(f'{MODELS_DIR}/scaler.pkl')
-    
     dnn_model = KRRAD_DNN(input_dim=4)
     dnn_model.load_state_dict(torch.load(f'{MODELS_DIR}/dnn_model.pth', map_location='cpu'))
     dnn_model.eval()
-    
     rf_model = joblib.load(f'{MODELS_DIR}/rf_model_big.pkl')
     iso_model = joblib.load(f'{MODELS_DIR}/iso_model_big.pkl')
-    
     rl_agent = DQN(input_dim=4, output_dim=3)
     rl_agent.load_state_dict(torch.load(f'{MODELS_DIR}/dqn_agent.pth', map_location='cpu'))
     rl_agent.eval()
-    
-    print("✅ AI Ensemble and RL Agent loaded successfully.")
+    print("✅ AI Ensemble loaded successfully.")
 except Exception as e:
     print(f"❌ Critical Error Loading Models: {e}")
     exit(1)
 
-# Mitigation Logic
 last_action_time = datetime.datetime.now()
+consecutive_blocks = 0
 
-def execute_mitigation(action, pps):
-    global last_action_time
+def get_safe_ips():
+    safe_ips = {"127.0.0.1", "localhost", "0.0.0.0", "192.168.49.1", "10.0.2.2"}
+    k8s_host = os.environ.get("KUBERNETES_SERVICE_HOST")
+    if k8s_host: safe_ips.add(k8s_host)
+    try:
+        with open("/proc/net/route") as fh:
+            for line in fh:
+                fields = line.strip().split()
+                if fields[1] == '00000000': 
+                    gw_ip = socket.inet_ntoa(struct.pack("<L", int(fields[2], 16)))
+                    safe_ips.add(gw_ip)
+    except: pass
+    return safe_ips
+
+def execute_mitigation(action, pps, target_ip=None):
+    global last_action_time, IS_SCALED_UP, consecutive_blocks
     ACTION_GAUGE.set(action)
     
+    # 0. MONITORING (and Recovery)
     if action == 0:
+        consecutive_blocks = 0
+        if IS_SCALED_UP and (datetime.datetime.now() - last_action_time).seconds > COOLDOWN_SECONDS:
+            print(f"📉 SAFE DETECTED: Scaling down to baseline...")
+            if k8s_apps_v1:
+                try:
+                    k8s_apps_v1.patch_namespaced_deployment_scale(
+                        name=SCALING_TARGET, namespace=NAMESPACE, body={"spec": {"replicas": 1}}
+                    )
+                    IS_SCALED_UP = False
+                    print("✅ Scale Down executed.")
+                except Exception as e: print(f"❌ Scale Down Failed: {e}")
+            last_action_time = datetime.datetime.now()
         return "MONITORING"
-        
+
     if (datetime.datetime.now() - last_action_time).seconds < COOLDOWN_SECONDS:
         return "COOLDOWN"
-        
+
+    # 1. BLOCKING
     if action == 1:
-        print(f"🛡️ RL Decision: Block Attack Signature (PPS: {pps})")
-        last_action_time = datetime.datetime.now()
-        return "BLOCKING"
+        # INTELLIGENT ESCALATION (No Static Thresholds)
+        # If we have tried to block 3 times in a row and we are still here,
+        # it means the attack is distributed (Whack-a-Mole situation).
+        if consecutive_blocks >= 2:
+            print(f"⚠️ BEHAVIOR ANALYSIS: Repeated blocking failed (Swarm Detected). Escalating to SCALING.")
+            action = 2 # Override decision
+        else:
+            consecutive_blocks += 1
+            if target_ip in get_safe_ips():
+                print(f"⚠️ Ignored BLOCK for Safe IP: {target_ip}")
+                return "MONITORING"
+            
+            print(f"🛡️ RL Decision: BLOCKING (PPS: {pps})")
+            if target_ip:
+                try:
+                    requests.post(f"{SENSOR_URL}/block", json={"ip": target_ip}, timeout=2)
+                    print(f"⛔ Sent BLOCK command for: {target_ip}")
+                except Exception as e: print(f"❌ Block Failed: {e}")
+            last_action_time = datetime.datetime.now()
+            return "BLOCKING"
         
-    elif action == 2:
-        print(f"⚖️ RL Decision: Scaling Resources (PPS: {pps})")
-        try:
-            subprocess.run(["kubectl", "scale", SCALING_TARGET, "--replicas=5", "-n", NAMESPACE], check=False)
-        except Exception as e:
-            print(f"Scaling Error: {e}")
+    # 2. SCALING
+    if action == 2:
+        print(f"⚖️ RL Decision: SCALING (PPS: {pps})")
+        if k8s_apps_v1:
+            try:
+                k8s_apps_v1.patch_namespaced_deployment_scale(
+                    name=SCALING_TARGET, namespace=NAMESPACE, body={"spec": {"replicas": 5}}
+                )
+                IS_SCALED_UP = True
+                consecutive_blocks = 0
+                print("✅ Scaling UP command executed.")
+            except Exception as e: print(f"❌ Scaling Failed: {e}")
         last_action_time = datetime.datetime.now()
         return "SCALING"
+
+    return "UNKNOWN"
 
 def get_sensor_data_blocking():
     while True:
         try:
             r = requests.get(f"{SENSOR_URL}/metrics", timeout=2)
-            if r.status_code == 200:
-                return r.json()
-        except:
-            print("⏳ Waiting for Sensor connection...")
+            if r.status_code == 200: return r.json()
+        except: print("⏳ Waiting for Sensor...")
         time.sleep(2)
 
-# Main Execution Loop
 start_http_server(8000)
-print("🚀 KRRAD Controller Live. Establishing Baseline...")
-
-# Initialize Baseline
+print("🚀 KRRAD Controller Live. v4.1-rc (Behavioral Logic).")
 baseline_data = get_sensor_data_blocking()
 last_packets = baseline_data.get('packets', 0)
 last_bytes = baseline_data.get('bytes', 0)
 last_time = time.monotonic()
-
-print("✅ Baseline Established. Monitoring Active.")
+print("✅ Baseline Established.")
 
 while True:
     time.sleep(1)
-    
     try:
-        data = requests.get(f"{SENSOR_URL}/metrics", timeout=1).json()
-    except:
-        continue
+        response = requests.get(f"{SENSOR_URL}/metrics", timeout=1).json()
+        data = response
+        potential_attacker_ip = response.get("top_source_ip")
+    except: continue
 
     curr_time = time.monotonic()
     curr_packets = data.get('packets', 0)
     curr_bytes = data.get('bytes', 0)
     
-    # Calculate Deltas
+    # Sensor Reset Detection
+    if curr_packets < last_packets:
+        print("🔄 Sensor Reset Detected. Recalibrating...")
+        last_packets = curr_packets
+        last_bytes = curr_bytes
+        last_time = curr_time
+        continue
+
     dt = curr_time - last_time
     if dt <= 0: continue
     
@@ -151,21 +213,16 @@ while True:
     features_scaled = scaler.transform(features_raw)
     features_tensor = torch.tensor(features_scaled, dtype=torch.float32)
     
-    with torch.no_grad():
-        dnn_conf = dnn_model(features_tensor).item()
+    with torch.no_grad(): dnn_conf = dnn_model(features_tensor).item()
     rf_pred = rf_model.predict(features_raw)[0]
     iso_pred = iso_model.predict(features_raw)[0]
     
-    # Consensus Engine
     final_status = 0
-    if rf_pred == 1 and dnn_conf > 0.8:
-        final_status = 1
-    elif dnn_conf > 0.95:
-        final_status = 1
-    elif iso_pred == -1 and pps > 100:
-        final_status = 2
+    if rf_pred == 1 and dnn_conf > 0.8: final_status = 1
+    elif dnn_conf > 0.95: final_status = 1
+    elif iso_pred == -1 and pps > 100: final_status = 2
     
-    # Reinforcement Learning Step
+    # RL Agent
     norm_pps = min(1.0, pps / 100000)
     norm_bps = min(1.0, bps / 10000000)
     est_cpu = min(1.0, pps / 50000)
@@ -175,18 +232,12 @@ while True:
     with torch.no_grad():
         action = torch.argmax(rl_agent(state)).item()
 
-    if pps < 100:
-        action = 0
-    
-    # Safety Override
-    if final_status >= 1 and action == 0:
-        action = 1
-    
-    mitigation = execute_mitigation(action, pps)
+    if pps < 50: action = 0
+    if final_status >= 1 and action == 0: action = 1
 
-    # Logging
+    mitigation = execute_mitigation(action, pps, target_ip=potential_attacker_ip)
+
     status_text = {0: "SAFE", 1: "ATTACK", 2: "SUSPICIOUS"}.get(final_status, "UNKNOWN")
-    
     if final_status > 0:
         print(f"🚨 {status_text} (PPS: {pps}) | Action: {mitigation}")
     else:
