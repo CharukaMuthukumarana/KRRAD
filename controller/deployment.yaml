@@ -17,8 +17,8 @@ spec:
       serviceAccountName: krrad-controller-sa
       containers:
       - name: controller
-        image: charuka2002/krrad-controller:4.1-rc  # Ensure this matches your latest build
-        imagePullPolicy: IfNotPresent
+        image: charuka2002/krrad-controller:4.1-rc
+        imagePullPolicy: Always
         env:
         - name: SENSOR_URL
           value: "http://krrad-sensor.kube-system.svc.cluster.local:5000"
