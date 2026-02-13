@@ -12,7 +12,7 @@ struct metrics_t {
 BPF_HASH(metrics_map, u32, struct metrics_t);
 BPF_HASH(blacklist, u32, u8);
 
-// --- NEW: Track Packets per Source IP ---
+// --- Track Packets per Source IP ---
 BPF_HASH(ip_tracker, u32, u64);
 
 int xdp_prog(struct xdp_md *ctx) {

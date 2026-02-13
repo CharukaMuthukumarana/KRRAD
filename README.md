@@ -1,5 +1,9 @@
 # KRRAD: Kubernetes-native Resilience and Response Against DDoS
 
+GitHub Link: https://github.com/CharukaMuthukumarana/KRRAD
+
+Dataset: https://www.kaggle.com/datasets/dhoogla/cicddos2019/data
+
 **KRRAD** is an autonomous security framework designed to detect and mitigate Distributed Denial of Service (DDoS) attacks in Kubernetes environments. It utilizes **eBPF (Extended Berkeley Packet Filter)** for high-performance telemetry and a hybrid **Machine Learning / Reinforcement Learning** engine for intelligent decision-making.
 
 ---

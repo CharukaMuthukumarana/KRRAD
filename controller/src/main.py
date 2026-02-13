@@ -102,10 +102,12 @@ def execute_mitigation(action, pps, target_ip=None):
     global last_action_time, IS_SCALED_UP, consecutive_blocks
     ACTION_GAUGE.set(action)
     
+    time_since_last = (datetime.datetime.now() - last_action_time).seconds
+
     # 0. MONITORING (and Recovery)
     if action == 0:
         consecutive_blocks = 0
-        if IS_SCALED_UP and (datetime.datetime.now() - last_action_time).seconds > COOLDOWN_SECONDS:
+        if IS_SCALED_UP and time_since_last > COOLDOWN_SECONDS:
             print(f"📉 SAFE DETECTED: Scaling down to baseline...")
             if k8s_apps_v1:
                 try:
@@ -118,18 +120,17 @@ def execute_mitigation(action, pps, target_ip=None):
             last_action_time = datetime.datetime.now()
         return "MONITORING"
 
-    if (datetime.datetime.now() - last_action_time).seconds < COOLDOWN_SECONDS:
-        return "COOLDOWN"
-
     # 1. BLOCKING
     if action == 1:
         # INTELLIGENT ESCALATION (No Static Thresholds)
-        # If we have tried to block 3 times in a row and we are still here,
-        # it means the attack is distributed (Whack-a-Mole situation).
         if consecutive_blocks >= 2:
             print(f"⚠️ BEHAVIOR ANALYSIS: Repeated blocking failed (Swarm Detected). Escalating to SCALING.")
             action = 2 # Override decision
         else:
+            # FAST COOLDOWN FOR BLOCKING (2 SECONDS)
+            if time_since_last < 2:
+                return "COOLDOWN"
+
             consecutive_blocks += 1
             if target_ip in get_safe_ips():
                 print(f"⚠️ Ignored BLOCK for Safe IP: {target_ip}")
@@ -146,6 +147,10 @@ def execute_mitigation(action, pps, target_ip=None):
         
     # 2. SCALING
     if action == 2:
+        # LONG COOLDOWN FOR SCALING (30 SECONDS)
+        if time_since_last < COOLDOWN_SECONDS:
+            return "COOLDOWN"
+
         print(f"⚖️ RL Decision: SCALING (PPS: {pps})")
         if k8s_apps_v1:
             try:
@@ -170,7 +175,7 @@ def get_sensor_data_blocking():
         time.sleep(2)
 
 start_http_server(8000)
-print("🚀 KRRAD Controller Live. v4.1-rc (Behavioral Logic).")
+print("🚀 KRRAD Controller Live. v4.2 (Fixed Mitigation Logic).")
 baseline_data = get_sensor_data_blocking()
 last_packets = baseline_data.get('packets', 0)
 last_bytes = baseline_data.get('bytes', 0)
