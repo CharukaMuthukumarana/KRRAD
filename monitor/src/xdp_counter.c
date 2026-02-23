@@ -12,7 +12,7 @@ struct metrics_t {
 BPF_HASH(metrics_map, u32, struct metrics_t);
 BPF_HASH(blacklist, u32, u8);
 
-// --- Track Packets per Source IP ---
+// Track Packets per Source IP
 BPF_HASH(ip_tracker, u32, u64);
 
 int xdp_prog(struct xdp_md *ctx) {
@@ -27,14 +27,14 @@ int xdp_prog(struct xdp_md *ctx) {
     struct iphdr *ip = data + sizeof(*eth);
     if ((void *)ip + sizeof(*ip) > data_end) return XDP_PASS;
 
-    // 1. Check Blacklist (Existing Logic)
+    // Check Blacklist (Existing Logic)
     u32 src_ip = ip->saddr;
     u8 *blocked = blacklist.lookup(&src_ip);
     if (blocked) {
         return XDP_DROP;
     }
 
-    // 2. Update Protocol Metrics (Existing Logic)
+    // Update Protocol Metrics (Existing Logic)
     u32 protocol = ip->protocol;
     u64 packet_len = (u64)(data_end - data);
     struct metrics_t zero = {0, 0};
@@ -44,7 +44,7 @@ int xdp_prog(struct xdp_md *ctx) {
         lock_xadd(&val->bytes, packet_len);
     }
 
-    // --- Count this specific IP ---
+    // Count this specific IP
     u64 zero_ip = 0;
     u64 *ip_count = ip_tracker.lookup_or_try_init(&src_ip, &zero_ip);
     if (ip_count) {

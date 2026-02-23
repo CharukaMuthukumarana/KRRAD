@@ -77,13 +77,13 @@ def block_ip():
     ip = request.json.get('ip')
     if not ip: return jsonify({"error": "No IP"}), 400
     
-    # 1. Block Little Endian (Host Order)
+    # Block Little Endian (Host Order)
     try:
         ip_le = struct.unpack("<I", socket.inet_aton(ip))[0]
         b["blacklist"][b["blacklist"].Key(ip_le)] = b["blacklist"].Leaf(1)
     except: pass
 
-    # 2. Block Big Endian (Network Order)
+    # Block Big Endian (Network Order)
     try:
         ip_be = struct.unpack("!I", socket.inet_aton(ip))[0]
         b["blacklist"][b["blacklist"].Key(ip_be)] = b["blacklist"].Leaf(1)
