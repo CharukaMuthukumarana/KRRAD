@@ -20,8 +20,16 @@ spec:
         image: charuka2002/krrad-controller:4.1-rc
         imagePullPolicy: Always
         env:
+        # 👇 1. Get the Node's Real IP dynamically
+        - name: HOST_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        
+        # 👇 2. Use that IP directly (Bypass DNS)
         - name: SENSOR_URL
-          value: "http://krrad-sensor.kube-system.svc.cluster.local:5000"
+          value: "http://$(HOST_IP):5000"
+        
         - name: PROMETHEUS_URL
           value: "http://prometheus-service.monitoring.svc.cluster.local:9090"
         ports:

@@ -22,11 +22,11 @@ CONFIDENCE_GAUGE = Gauge('krrad_ai_confidence', 'Ensemble Confidence Score')
 ACTION_GAUGE = Gauge('krrad_mitigation_action', 'RL Action Taken (0=Wait, 1=Block, 2=Scale)')
 
 # Configuration
-SENSOR_URL = "http://krrad-sensor.kube-system:5000"
+SENSOR_URL = os.environ.get("SENSOR_URL", "http://krrad-sensor.kube-system:5000")
 MODELS_DIR = "/app/models"
 SCALING_TARGET = "krrad-target"
 NAMESPACE = "default"
-COOLDOWN_SECONDS = 30
+COOLDOWN_SECONDS = 5
 IS_SCALED_UP = False
 
 # Deep Learning Model
@@ -85,6 +85,7 @@ last_action_time = datetime.datetime.now()
 consecutive_blocks = 0
 
 def get_safe_ips():
+    # Added common local IPs
     safe_ips = {"127.0.0.1", "localhost", "0.0.0.0", "192.168.49.1", "10.0.2.2"}
     k8s_host = os.environ.get("KUBERNETES_SERVICE_HOST")
     if k8s_host: safe_ips.add(k8s_host)
@@ -102,7 +103,7 @@ def execute_mitigation(action, pps, target_ip=None):
     global last_action_time, IS_SCALED_UP, consecutive_blocks
     ACTION_GAUGE.set(action)
     
-    # 0. MONITORING (and Recovery)
+    # 0. MONITORING
     if action == 0:
         consecutive_blocks = 0
         if IS_SCALED_UP and (datetime.datetime.now() - last_action_time).seconds > COOLDOWN_SECONDS:
@@ -123,18 +124,20 @@ def execute_mitigation(action, pps, target_ip=None):
 
     # 1. BLOCKING
     if action == 1:
-        # INTELLIGENT ESCALATION (No Static Thresholds)
-        # If we have tried to block 3 times in a row and we are still here,
-        # it means the attack is distributed (Whack-a-Mole situation).
         if consecutive_blocks >= 2:
             print(f"⚠️ BEHAVIOR ANALYSIS: Repeated blocking failed (Swarm Detected). Escalating to SCALING.")
-            action = 2 # Override decision
+            action = 2 
         else:
             consecutive_blocks += 1
             if target_ip in get_safe_ips():
                 print(f"⚠️ Ignored BLOCK for Safe IP: {target_ip}")
                 return "MONITORING"
             
+            # --- FIX: Don't block Google Cloud Health Checks or low traffic ---
+            if pps < 100:
+                print(f"⚠️ Ignoring Low-PPS Alert ({pps} PPS). Likely Health Check.")
+                return "MONITORING"
+
             print(f"🛡️ RL Decision: BLOCKING (PPS: {pps})")
             if target_ip:
                 try:
@@ -170,7 +173,7 @@ def get_sensor_data_blocking():
         time.sleep(2)
 
 start_http_server(8000)
-print("🚀 KRRAD Controller Live. v4.1-rc (Behavioral Logic).")
+print("🚀 KRRAD Controller Live. v4.2-patched (Stuck-Log & GCP-Fix).")
 baseline_data = get_sensor_data_blocking()
 last_packets = baseline_data.get('packets', 0)
 last_bytes = baseline_data.get('bytes', 0)
@@ -183,13 +186,15 @@ while True:
         response = requests.get(f"{SENSOR_URL}/metrics", timeout=1).json()
         data = response
         potential_attacker_ip = response.get("top_source_ip")
-    except: continue
+    except Exception as e:
+        # --- FIX: Print warning instead of staying silent ---
+        print(f"⚠️ Sensor Unreachable: {e}")
+        continue
 
     curr_time = time.monotonic()
     curr_packets = data.get('packets', 0)
     curr_bytes = data.get('bytes', 0)
     
-    # Sensor Reset Detection
     if curr_packets < last_packets:
         print("🔄 Sensor Reset Detected. Recalibrating...")
         last_packets = curr_packets
@@ -232,8 +237,11 @@ while True:
     with torch.no_grad():
         action = torch.argmax(rl_agent(state)).item()
 
-    if pps < 50: action = 0
-    if final_status >= 1 and action == 0: action = 1
+    # --- FIX: Ensure Safety Net is Respected ---
+    if pps < 100: 
+        action = 0
+    elif final_status >= 1 and action == 0: 
+        action = 1
 
     mitigation = execute_mitigation(action, pps, target_ip=potential_attacker_ip)
 
