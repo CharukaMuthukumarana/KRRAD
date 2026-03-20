@@ -30,19 +30,29 @@ echo "[3/5] Deploying Core Resources..."
 kubectl apply -f /home/charuka2002buss/KRRAD/monitor/service.yaml
 kubectl apply -f /home/charuka2002buss/KRRAD/monitor/daemonset.yaml
 kubectl apply -f /home/charuka2002buss/KRRAD/controller/deployment.yaml
-[ -f "/home/charuka2002buss/KRRAD/controller/monitoring.yaml" ] && kubectl apply -f /home/charuka2002buss/KRRAD/controller/monitoring.yaml
+
+# IMPORTANT: Ensure the monitoring/dashboard config is applied
+if [ -f "/home/charuka2002buss/KRRAD/controller/monitoring.yaml" ]; then
+    echo "📊 Applying KRRAD Monitoring & Dashboards..."
+    kubectl apply -f /home/charuka2002buss/KRRAD/controller/monitoring.yaml
+fi
 
 # 5. UI & Dashboard Automation
-echo "⏳ Waiting for stability..."
+echo "⏳ Waiting for stabilit..."
 sleep 40
 
-# Restart Grafana to pick up dashboards immediately
+# Restart Grafana to force it to read the ConfigMaps from monitoring.yaml
+echo "🔄 Restarting Grafana to sync dashboards..."
 kubectl delete pod -l app.kubernetes.io/name=grafana --ignore-not-found
+
+# Wait until the new pod is actually ready before forwarding ports
+echo "⏳ Waiting for new Grafana pod to be Ready..."
+kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=grafana --timeout=120s
 
 echo "🚀 Launching Background Services..."
 # Port Forward for Grafana (Port 3000)
 pkill -f "port-forward" || true
-nohup kubectl port-forward deployment/monitoring-grafana --address 0.0.0.0 3000:3000 > /dev/null 2>&1 &
+nohup kubectl port-forward deployment/monitoring-grafana --address 0.0.0.0 3000:3000 > /home/charuka2002buss/KRRAD/ui/grafana_forward.log 2>&1 &
 
 # Launch Streamlit Defense Hub (Port 8501)
 pkill -f "streamlit" || true
