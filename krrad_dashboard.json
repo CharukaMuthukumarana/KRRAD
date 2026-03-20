@@ -1,41 +1,4 @@
 {
-  "__inputs": [
-    {
-      "name": "DS_KRRAD-DIRECT",
-      "label": "KRRAD-Direct",
-      "description": "",
-      "type": "datasource",
-      "pluginId": "prometheus",
-      "pluginName": "Prometheus"
-    }
-  ],
-  "__elements": {},
-  "__requires": [
-    {
-      "type": "grafana",
-      "id": "grafana",
-      "name": "Grafana",
-      "version": "12.3.1"
-    },
-    {
-      "type": "datasource",
-      "id": "prometheus",
-      "name": "Prometheus",
-      "version": "1.0.0"
-    },
-    {
-      "type": "panel",
-      "id": "stat",
-      "name": "Stat",
-      "version": ""
-    },
-    {
-      "type": "panel",
-      "id": "timeseries",
-      "name": "Time series",
-      "version": ""
-    }
-  ],
   "annotations": {
     "list": [
       {
@@ -55,12 +18,13 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
+  "id": 30,
   "links": [],
   "panels": [
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_KRRAD-DIRECT}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -134,7 +98,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_KRRAD-DIRECT}"
+            "uid": "prometheus"
           },
           "editorMode": "builder",
           "expr": "krrad_attack_status",
@@ -149,7 +113,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_KRRAD-DIRECT}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -230,15 +194,15 @@
       "pluginVersion": "12.3.1",
       "targets": [
         {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "editorMode": "builder",
           "expr": "krrad_ai_confidence",
           "legendFormat": "__auto",
           "range": true,
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_KRRAD-DIRECT}"
-          }
+          "refId": "A"
         }
       ],
       "title": "AI Confidence Gauge",
@@ -247,7 +211,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_KRRAD-DIRECT}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -348,20 +312,20 @@
       "pluginVersion": "12.3.1",
       "targets": [
         {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "editorMode": "builder",
           "expr": "krrad_traffic_pps",
           "legendFormat": "__auto",
           "range": true,
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_KRRAD-DIRECT}"
-          }
+          "refId": "A"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_KRRAD-DIRECT}"
+            "uid": "prometheus"
           },
           "editorMode": "builder",
           "expr": "krrad_traffic_bps",
@@ -389,9 +353,8 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "KRRAD Main Dashboard",
-  "uid": "adq9vwp",
-  "version": 6,
-  "weekStart": "",
-  "id": null
+  "title": "KRRAD Main Dashboard 2",
+  "uid": "adq9vwp2",
+  "version": 1
 }
+
