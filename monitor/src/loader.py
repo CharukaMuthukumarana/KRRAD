@@ -63,7 +63,10 @@ def get_metrics():
             # Convert integer IP back to string 
             top_ip_str = socket.inet_ntoa(struct.pack("<I", k.value))
 
-    # b["ip_tracker"].clear()
+    try:
+        b["ip_tracker"].clear()
+    except Exception as e:
+        print(f"Warning: Failed to clear map: {e}")
 
     return jsonify({
         "packets": total_packets,

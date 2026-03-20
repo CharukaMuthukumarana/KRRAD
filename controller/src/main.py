@@ -183,7 +183,7 @@ print("✅ Baseline Established.")
 while True:
     time.sleep(1)
     try:
-        response = requests.get(f"{SENSOR_URL}/metrics", timeout=1).json()
+        response = requests.get(f"{SENSOR_URL}/metrics", timeout=3).json()
         data = response
         potential_attacker_ip = response.get("top_source_ip")
     except Exception as e:

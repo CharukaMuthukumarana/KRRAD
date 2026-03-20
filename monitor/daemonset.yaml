@@ -16,7 +16,7 @@ spec:
       hostPID: true
       containers:
       - name: sensor
-        image: charuka2002/krrad-sensor:v2.0-rc
+        image: charuka2002/krrad-sensor:v2
         imagePullPolicy: Always
         securityContext:
           privileged: true

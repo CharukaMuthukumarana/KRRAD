@@ -17,7 +17,7 @@ spec:
       serviceAccountName: krrad-controller-sa
       containers:
       - name: controller
-        image: charuka2002/krrad-controller:4.1-rc
+        image: charuka2002/krrad-controller:v2
         imagePullPolicy: Always
         env:
         # 👇 1. Get the Node's Real IP dynamically
