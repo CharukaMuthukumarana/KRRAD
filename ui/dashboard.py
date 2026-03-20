@@ -14,27 +14,22 @@ st.markdown("""
     .main { background-color: #0e1117; color: white; }
     .stButton>button { width: 100%; border-radius: 8px; height: 3.5em; background-color: #1f2937; color: white; border: 1px solid #374151; transition: 0.3s; }
     .stButton>button:hover { background-color: #ff4b4b; border: 1px solid #ff4b4b; transform: translateY(-2px); }
-    .status-card { padding: 20px; border-radius: 10px; background-color: #111827; border-left: 5px solid #ff4b4b; margin-bottom: 10px; }
-    .log-container { background-color: #000000; color: #00ff00; padding: 15px; border-radius: 5px; font-family: 'Courier New', Courier, monospace; height: 300px; overflow-y: auto; }
     </style>
     """, unsafe_allow_html=True)
 
 # --- Sidebar ---
 with st.sidebar:
     st.header("⚙️ Cloud Configuration")
-    # This is where you tell the Cloud UI where your VM is currently living
     krrad_vm_ip = st.text_input("🔑 KRRAD Backend IP", placeholder="35.xxx.xxx.xxx")
     attacker_vm_ip = st.text_input("📡 Attacker VM IP", placeholder="34.xxx.xxx.xxx")
     
     if krrad_vm_ip:
         st.success("Connected to Backend")
+        st.markdown(f"📊 [**Open Grafana**](http://{krrad_vm_ip}:3000)")
     else:
         st.warning("Please enter VM IP to fetch data")
     
     st.divider()
-    if krrad_vm_ip:
-        st.markdown(f"📊 [**Open Grafana**](http://{krrad_vm_ip}:3000)")
-    
     if st.button("🔄 Hard Reset UI"):
         st.rerun()
 
@@ -72,9 +67,10 @@ if st.button("🔍 Refresh System Health"):
     data = fetch_from_vm("health")
     if data:
         st.subheader("Live Pod Status")
-        st.text(data.get('output', 'No output received from backend.'))
+        # Ensure we use 'output' key as defined in management_api.py
+        st.text(data.get('output', 'No data returned.'))
     else:
-        st.error("Backend unreachable. Is the Management API running on port 8000?")
+        st.error("Backend unreachable. Ensure Port 8000 is open on GCP Firewall.")
 
 # --- Section 2: Command & Control ---
 st.divider()
@@ -84,18 +80,17 @@ with col_atk:
     st.subheader("🚀 Attack Orchestration")
     with st.container(border=True):
         a_col1, a_col2 = st.columns(2)
-        # Attacks target the Backend VM IP
         if a_col1.button("🌊 SYN Flood"):
             if send_remote_attack("syn_flood", krrad_vm_ip): st.success("SYN Flood Started")
-            else: st.error("Attack failed. Check Attacker IP.")
+            else: st.error("Attack failed.")
             
         if a_col2.button("🚀 UDP Flood"):
             if send_remote_attack("udp_flood", krrad_vm_ip): st.success("UDP Flood Started")
-            else: st.error("Attack failed. Check Attacker IP.")
+            else: st.error("Attack failed.")
             
         if a_col1.button("🔥 HTTP Flood"):
             if send_remote_attack("http_flood", krrad_vm_ip): st.success("HTTP Flood Started")
-            else: st.error("Attack failed. Check Attacker IP.")
+            else: st.error("Attack failed.")
             
         if a_col2.button("🛑 STOP ATTACKS", type="secondary"):
             try:
@@ -111,13 +106,14 @@ with col_def:
             with st.status("Requesting Remote Reset...", expanded=True) as status:
                 data = fetch_from_vm("reset", method="POST")
                 if data:
-                    st.code(data.get('output', 'Reset command executed.'))
+                    st.code(data.get('output', 'Reset executed.'))
                     status.update(label="System Baseline Restored!", state="complete")
                 else:
                     st.error("Failed to reach Backend API.")
         
         if st.button("🧠 Restart RL Agent"):
-            data = fetch_from_vm("restart-controller", method="POST")
+            # FIXED: Endpoint changed to match management_api.py route
+            data = fetch_from_vm("restart-ai", method="POST")
             if data:
                 st.toast("AI Controller Restarting...")
             else:
@@ -129,10 +125,11 @@ st.subheader("🧠 Live AI Intelligence Feed")
 
 if st.checkbox("Enable Real-time Stream"):
     log_placeholder = st.empty()
-    for _ in range(10):  # Simplified streaming loop
+    for _ in range(30):  # Stream for about a minute
         data = fetch_from_vm("logs")
         if data:
-            logs = data.get('output', '')
+            # FIXED: Key changed to 'logs' to match management_api.py
+            logs = data.get('logs', '')
             pps_match = re.findall(r"PPS: (\d+)", logs)
             current_pps = pps_match[-1] if pps_match else "0"
             
@@ -140,7 +137,7 @@ if st.checkbox("Enable Real-time Stream"):
                 st.metric("Detected Traffic (PPS)", f"{current_pps} pkts/sec")
                 st.code(logs, language="bash")
         else:
-            st.warning("Waiting for logs from API...")
+            st.warning("Waiting for data from API...")
         time.sleep(2)
 else:
     st.info("Log streaming is paused.")
