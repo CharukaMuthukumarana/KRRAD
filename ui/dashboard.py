@@ -1,10 +1,9 @@
 import streamlit as st
 import os
-import subprocess
 import requests
-import time
 import pandas as pd
 import re
+import time
 
 # Page Config
 st.set_page_config(page_title="KRRAD | AI Defense Hub", layout="wide", initial_sidebar_state="expanded")
@@ -20,72 +19,62 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- Session State Initialization ---
-if 'show_pods' not in st.session_state: st.session_state.show_pods = False
-if 'log_active' not in st.session_state: st.session_state.log_active = False
-
-# --- Helper Functions ---
-def get_ip():
-    return os.popen('curl -s ifconfig.me').read().strip()
-
-def get_detailed_pods():
-    # Fetch Namespace, Name, Ready status, and Phase
-    cmd = "kubectl get pods -A -o custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name,READY:.status.containerStatuses[*].ready,STATUS:.status.phase"
-    lines = os.popen(cmd).read().strip().split('\n')[1:]
-    data = []
-    for line in lines:
-        parts = line.split()
-        if len(parts) >= 4:
-            # Logic: A pod is ONLY "Healthy" if ALL containers are True
-            ready_list = parts[2].split(',')
-            is_fully_ready = all(r.lower() == 'true' for r in ready_list)
-            status_text = "✅ Ready" if (is_fully_ready and parts[3] == "Running") else "⚠️ Partial/Starting"
-            if parts[3] != "Running": status_text = f"❌ {parts[3]}"
-            
-            data.append({"Namespace": parts[0], "Pod Name": parts[1], "Health": status_text, "Status": parts[3]})
-    return pd.DataFrame(data)
-
-def send_remote_attack(vector, attacker_ip, target_ip):
-    try:
-        url = f"http://{attacker_ip}:5000/launch"
-        payload = {"vector": vector, "target_ip": target_ip, "target_port": "32028"}
-        r = requests.post(url, json=payload, timeout=5)
-        return r.status_code == 200
-    except: return False
-
-# --- UI Header ---
-st.title("🛡️ KRRAD: AI-Driven DDoS Defense")
-st.caption(f"Collaborative Research Node | Logged in as: {os.getlogin()}")
-
-# --- Sidebar Configuration ---
+# --- Sidebar ---
 with st.sidebar:
-    st.header("⚙️ Control Plane")
-    attacker_ip = st.text_input("📡 Attacker VM IP", placeholder="Paste IP here...")
-    vm_ip = get_ip()
+    st.header("⚙️ Cloud Configuration")
+    # This is where you tell the Cloud UI where your VM is currently living
+    krrad_vm_ip = st.text_input("🔑 KRRAD Backend IP", placeholder="35.xxx.xxx.xxx")
+    attacker_vm_ip = st.text_input("📡 Attacker VM IP", placeholder="34.xxx.xxx.xxx")
+    
+    if krrad_vm_ip:
+        st.success("Connected to Backend")
+    else:
+        st.warning("Please enter VM IP to fetch data")
     
     st.divider()
-    st.metric(label="System Status", value="PROTECTED", delta="AI Active")
-    st.markdown(f"📊 [**Open Grafana**](http://{vm_ip}:3000)")
+    if krrad_vm_ip:
+        st.markdown(f"📊 [**Open Grafana**](http://{krrad_vm_ip}:3000)")
     
     if st.button("🔄 Hard Reset UI"):
         st.rerun()
 
-# --- Section 1: Dynamic System Health ---
+# --- API Helper Functions ---
+def fetch_from_vm(endpoint, method="GET", payload=None):
+    if not krrad_vm_ip: return None
+    url = f"http://{krrad_vm_ip}:8000/{endpoint}"
+    try:
+        if method == "GET": 
+            r = requests.get(url, timeout=5)
+        else: 
+            r = requests.post(url, json=payload, timeout=10)
+        return r.json()
+    except: 
+        return None
+
+def send_remote_attack(vector, target_ip):
+    if not attacker_vm_ip: return False
+    try:
+        url = f"http://{attacker_vm_ip}:5000/launch"
+        payload = {"vector": vector, "target_ip": target_ip, "target_port": "32028"}
+        r = requests.post(url, json=payload, timeout=5)
+        return r.status_code == 200
+    except: 
+        return False
+
+# --- UI Header ---
+st.title("🛡️ KRRAD Distributed Defense Hub")
+st.caption(f"Collaborative Research Node | Final Year Project - Charuka Muthukumarana")
+
+# --- Section 1: Infrastructure Status ---
 st.header("📋 Infrastructure Status")
-col_h1, col_h2 = st.columns([1, 4])
 
-with col_h1:
-    # Toggle functionality using Session State
-    if st.button("🔍 Toggle Pod View"):
-        st.session_state.show_pods = not st.session_state.show_pods
-
-if st.session_state.show_pods:
-    df = get_detailed_pods()
-    # Highlighting specific KRRAD components
-    st.dataframe(df, use_container_width=True, hide_index=True)
-    if st.button("✖️ Close Pod View"):
-        st.session_state.show_pods = False
-        st.rerun()
+if st.button("🔍 Refresh System Health"):
+    data = fetch_from_vm("health")
+    if data:
+        st.subheader("Live Pod Status")
+        st.text(data.get('output', 'No output received from backend.'))
+    else:
+        st.error("Backend unreachable. Is the Management API running on port 8000?")
 
 # --- Section 2: Command & Control ---
 st.divider()
@@ -95,53 +84,63 @@ with col_atk:
     st.subheader("🚀 Attack Orchestration")
     with st.container(border=True):
         a_col1, a_col2 = st.columns(2)
+        # Attacks target the Backend VM IP
         if a_col1.button("🌊 SYN Flood"):
-            if send_remote_attack("syn_flood", attacker_ip, vm_ip): st.success("SYN Flood Started")
+            if send_remote_attack("syn_flood", krrad_vm_ip): st.success("SYN Flood Started")
+            else: st.error("Attack failed. Check Attacker IP.")
+            
         if a_col2.button("🚀 UDP Flood"):
-            if send_remote_attack("udp_flood", attacker_ip, vm_ip): st.success("UDP Flood Started")
+            if send_remote_attack("udp_flood", krrad_vm_ip): st.success("UDP Flood Started")
+            else: st.error("Attack failed. Check Attacker IP.")
+            
         if a_col1.button("🔥 HTTP Flood"):
-            if send_remote_attack("http_flood", attacker_ip, vm_ip): st.success("HTTP Flood Started")
+            if send_remote_attack("http_flood", krrad_vm_ip): st.success("HTTP Flood Started")
+            else: st.error("Attack failed. Check Attacker IP.")
+            
         if a_col2.button("🛑 STOP ATTACKS", type="secondary"):
             try:
-                requests.post(f"http://{attacker_ip}:5000/stop", timeout=5)
+                requests.post(f"http://{attacker_vm_ip}:5000/stop", timeout=5)
                 st.info("Stop Command Sent")
-            except: st.error("Attacker Offline")
+            except: 
+                st.error("Attacker Offline")
 
 with col_def:
     st.subheader("🛡️ Defense Operations")
     with st.container(border=True):
         if st.button("🚨 EMERGENCY RESET", type="primary"):
-            with st.status("Executing Deep Clean...", expanded=True) as status:
-                out = subprocess.getoutput("python3 /home/charuka2002buss/KRRAD/demo/reset.py")
-                st.code(out)
-                status.update(label="System Baseline Restored!", state="complete")
+            with st.status("Requesting Remote Reset...", expanded=True) as status:
+                data = fetch_from_vm("reset", method="POST")
+                if data:
+                    st.code(data.get('output', 'Reset command executed.'))
+                    status.update(label="System Baseline Restored!", state="complete")
+                else:
+                    st.error("Failed to reach Backend API.")
         
         if st.button("🧠 Restart RL Agent"):
-            os.system("kubectl rollout restart deployment krrad-controller")
-            st.toast("AI Controller Restarting...")
+            data = fetch_from_vm("restart-controller", method="POST")
+            if data:
+                st.toast("AI Controller Restarting...")
+            else:
+                st.error("Failed to reach Backend API.")
 
 # --- Section 3: Real-Time Intelligence ---
 st.divider()
 st.subheader("🧠 Live AI Intelligence Feed")
 
-log_toggle = st.toggle("Enable Real-time Stream", value=st.session_state.log_active)
-st.session_state.log_active = log_toggle
-
-if st.session_state.log_active:
+if st.checkbox("Enable Real-time Stream"):
     log_placeholder = st.empty()
-    # Display logic for real-time feel
-    for _ in range(20): # Loop to simulate streaming
-        logs = os.popen("kubectl logs --tail=15 -l app=krrad-controller").read()
-        
-        # Extra Feature: Extract PPS from logs for a live metric
-        pps_match = re.findall(r"PPS: (\d+)", logs)
-        current_pps = pps_match[-1] if pps_match else "0"
-        
-        with log_placeholder.container():
-            st.metric("Detected Traffic (PPS)", f"{current_pps} pkts/sec")
-            st.code(logs, language="bash")
+    for _ in range(10):  # Simplified streaming loop
+        data = fetch_from_vm("logs")
+        if data:
+            logs = data.get('output', '')
+            pps_match = re.findall(r"PPS: (\d+)", logs)
+            current_pps = pps_match[-1] if pps_match else "0"
+            
+            with log_placeholder.container():
+                st.metric("Detected Traffic (PPS)", f"{current_pps} pkts/sec")
+                st.code(logs, language="bash")
+        else:
+            st.warning("Waiting for logs from API...")
         time.sleep(2)
-        if not st.session_state.log_active: break
 else:
-    st.info("Log streaming is paused. Enable the toggle above to start.")
-
+    st.info("Log streaming is paused.")
