@@ -66,28 +66,30 @@ st.header("📋 Infrastructure Status")
 col_health1, col_health2 = st.columns(2)
 
 with col_health1:
-    if st.button("🔍Check System Health"):
-        st.session_state['refresh'] = True
+    if st.button("🔍 Toggle System Health Table"):
+        st.session_state.show_health = not st.session_state.show_health
 
 with col_health2:
     if st.button("🛠️ Auto-Heal Cluster", type="secondary"):
         with st.spinner("Executing Deep Cluster Healing..."):
-            data = fetch_from_vm("heal", method="POST")
-            if data:
-                st.success(data.get('output'))
-                time.sleep(2)
+            res = fetch_from_vm("heal", method="POST")
+            if res: st.success(res.get('output'))
 
-# Always fetch health dynamically
-data = fetch_from_vm("health")
-if data and "pods" in data:
-    df = pd.DataFrame(data["pods"])
-    def color_health(val):
-        if '✅' in val: return 'color: #00FF00'
-        if '⚠️' in val: return 'color: #FFFF00'
-        return 'color: #FF0000'
-    st.dataframe(df.style.map(color_health, subset=['Health']), use_container_width=True, hide_index=True)
-else:
-    if krrad_vm_ip: st.error("Backend unreachable. Ensure Port 8000 is open on GCP Firewall.")
+if st.session_state.show_health:
+    with st.container(border=True):
+        data = fetch_from_vm("health")
+        if data and "pods" in data:
+            df = pd.DataFrame(data["pods"])
+            def color_health(val):
+                if '✅' in val: return 'color: #00FF00'
+                if '⚠️' in val: return 'color: #FFFF00'
+                return 'color: #FF0000'
+            st.dataframe(df.style.map(color_health, subset=['Health']), use_container_width=True, hide_index=True)
+            if st.button("✖️ Close Table"):
+                st.session_state.show_health = False
+                st.rerun()
+        else:
+            if krrad_vm_ip: st.error("Backend unreachable.")
 
 # --- Section 2: Command & Control ---
 st.divider()
@@ -97,24 +99,28 @@ with col_atk:
     st.subheader("🚀 Attack Orchestration")
     with st.container(border=True):
         a_col1, a_col2 = st.columns(2)
-        if a_col1.button(" SYN Flood"):
+        if a_col1.button("SYN Flood"):
             if send_remote_attack("syn_flood", krrad_vm_ip): st.success("SYN Flood Started")
             else: st.error("Attack failed.")
             
-        if a_col2.button(" Spoofed SWARM"):
-            if send_remote_attack("swarm_flood", krrad_vm_ip): st.success("Swarm Started")
-            else: st.error("Attack failed.")
+        if a_col2.button("Flash Crowd (Scale Test)"):
+            if fetch_from_vm("simulate-swarm", method="POST"): 
+                st.success("Trusted Swarm Started! Watch AI escalate...")
+            else: st.error("Failed to trigger internal swarm.")
             
-        if a_col1.button(" Slowloris"):
+        if a_col1.button("Slowloris"):
             if send_remote_attack("slowloris", krrad_vm_ip): st.success("Slowloris Started")
             else: st.error("Attack failed.")
             
         if a_col2.button("🛑 STOP ATTACKS", type="secondary"):
+            # Stops internal scaling tests
+            fetch_from_vm("stop-swarm", method="POST")
+            
             try:
                 requests.post(f"http://{attacker_vm_ip}:5000/stop", timeout=5)
-                st.info("Stop Command Sent")
             except: 
-                st.error("Attacker Offline")
+                pass
+            st.info("Stop Command Sent")
 
 with col_def:
     st.subheader("🛡️ Defense Operations")

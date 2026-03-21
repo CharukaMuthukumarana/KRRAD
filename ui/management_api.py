@@ -64,33 +64,41 @@ def feedback():
 
 @app.route('/clear-history', methods=['POST'])
 def clear_history():
-    global mitigation_history, seen_logs
+    global mitigation_history
+    # FIX: We ONLY clear the history array. We leave seen_logs intact 
+    # so the API doesn't re-parse old logs as "new" events!
     mitigation_history.clear()
-    seen_logs.clear()
     return jsonify({"status": "cleared"})
+
+# --- NEW: Local Swarm Simulator (Bypasses GCP Spoofing Filters) ---
+@app.route('/simulate-swarm', methods=['POST'])
+def simulate_swarm():
+    # Uses a tiny, fast Docker container to launch a swarm locally
+    cmd = "docker run --rm -d --name swarm_flood --net=host alpine sh -c 'apk add --no-cache hping3 && hping3 -S --flood -p 32028 127.0.0.1'"
+    subprocess.Popen(cmd, shell=True)
+    return jsonify({"status": "Swarm simulated locally"})
+
+@app.route('/stop-swarm', methods=['POST'])
+def stop_swarm():
+    subprocess.getoutput("docker rm -f swarm_flood")
+    return jsonify({"status": "stopped"})
 
 @app.route('/reset', methods=['POST'])
 def reset():
-    global mitigation_history, seen_logs
+    global mitigation_history
     mitigation_history.clear()
-    seen_logs.clear()
     return jsonify({"output": subprocess.getoutput("python3 /home/charuka2002buss/KRRAD/demo/reset.py")})
 
 @app.route('/restart-ai', methods=['POST'])
 def restart():
     return jsonify({"output": subprocess.getoutput("kubectl rollout restart deployment krrad-controller")})
 
-# --- NEW: Cluster Auto-Heal Endpoint ---
 @app.route('/heal', methods=['POST'])
 def heal():
-    # 1. Nuke corrupted Prometheus PVCs (Fixes the 1/2 issue permanently)
     subprocess.getoutput("kubectl delete pvc -l app.kubernetes.io/name=prometheus -n default --ignore-not-found")
-    
-    # 2. Find and delete ANY pod that is not fully healthy
     cmd = "kubectl get pods -A | awk 'NR>1 {split($3,a,\"/\"); if(a[1]!=a[2] || $4!=\"Running\") print $2 \" -n \" $1}' | xargs -L 1 kubectl delete pod --ignore-not-found"
-    output = subprocess.getoutput(cmd)
-    
-    return jsonify({"output": "Cluster Auto-Heal Executed. Corrupted volumes cleared and unhealthy pods restarted."})
+    subprocess.getoutput(cmd)
+    return jsonify({"output": "Cluster Auto-Heal Executed."})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8000)
