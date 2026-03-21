@@ -30,36 +30,30 @@ echo "[3/5] Deploying Core Resources..."
 kubectl apply -f /home/charuka2002buss/KRRAD/monitor/service.yaml
 kubectl apply -f /home/charuka2002buss/KRRAD/monitor/daemonset.yaml
 kubectl apply -f /home/charuka2002buss/KRRAD/controller/deployment.yaml
-
-# IMPORTANT: Ensure the monitoring/dashboard config is applied
 if [ -f "/home/charuka2002buss/KRRAD/controller/monitoring.yaml" ]; then
-    echo "📊 Applying KRRAD Monitoring & Dashboards..."
     kubectl apply -f /home/charuka2002buss/KRRAD/controller/monitoring.yaml
 fi
 
-# 5. UI & Dashboard Automation
-echo "⏳ Waiting for stabilit..."
+# 5. Stability & Service Automation
+echo "⏳ Waiting for stability (Sleep 40)..."
 sleep 40
 
-# Restart Grafana to force it to read the ConfigMaps from monitoring.yaml
-echo "🔄 Restarting Grafana to sync dashboards..."
+echo "🔄 Syncing Grafana Dashboards..."
 kubectl delete pod -l app.kubernetes.io/name=grafana --ignore-not-found
-
-# Wait until the new pod is actually ready before forwarding ports
-echo "⏳ Waiting for new Grafana pod to be Ready..."
 kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=grafana --timeout=120s
 
-echo "🚀 Launching Background Services..."
+echo "🚀 Launching Background APIs & Services..."
+
 # Port Forward for Grafana (Port 3000)
 pkill -f "port-forward" || true
 nohup kubectl port-forward deployment/monitoring-grafana --address 0.0.0.0 3000:3000 > /home/charuka2002buss/KRRAD/ui/grafana_forward.log 2>&1 &
 
-# Launch Streamlit Defense Hub (Port 8501)
-pkill -f "streamlit" || true
-nohup python3 -m streamlit run /home/charuka2002buss/KRRAD/ui/dashboard.py --server.port 8501 --server.address 0.0.0.0 > /home/charuka2002buss/KRRAD/ui/streamlit.log 2>&1 &
+# Launch Management API (Port 8000) - FOR CLOUD UI
+pkill -f "management_api.py" || true
+nohup python3 /home/charuka2002buss/KRRAD/ui/management_api.py > /home/charuka2002buss/KRRAD/ui/api.log 2>&1 &
 
 echo "========================================"
 echo "✅ SYSTEM FULLY ACTIVE"
-echo "🛡️  Defense Hub: http://$(curl -s ifconfig.me):8501"
-echo "📊 Grafana:     http://$(curl -s ifconfig.me):3000"
+echo "🔑 Management API: http://$(curl -s ifconfig.me):8000"
+echo "📊 Grafana Dashboard: http://$(curl -s ifconfig.me):3000"
 echo "========================================"
