@@ -64,12 +64,6 @@ except Exception as e: exit(1)
 last_action_time = datetime.datetime.now()
 consecutive_blocks = 0
 
-def is_safe_ip(ip):
-    # Only internal loopback is safe to force scaling on local tests
-    if str(ip) in ["127.0.0.1", "localhost"]:
-        return True
-    return False
-
 def execute_mitigation(action, pps, target_ip=None):
     global last_action_time, IS_SCALED_UP, consecutive_blocks
     ACTION_GAUGE.set(action)
@@ -88,16 +82,12 @@ def execute_mitigation(action, pps, target_ip=None):
         return "COOLDOWN"
 
     if action == 1:
-        if is_safe_ip(target_ip):
-            print(f"⚠️ TRUSTED PROXY DETECTED ({target_ip}). Bypassing Block -> Escalating to SCALING.")
-            action = 2 
-        elif consecutive_blocks >= 2:
-            print(f"⚠️ BEHAVIOR ANALYSIS: Repeated blocking failed. Escalating to SCALING.")
+        if consecutive_blocks >= 1: # Trigger scaling faster for the demonstration
+            print(f"⚠️ BEHAVIOR ANALYSIS: Distributed flood detected. Escalating to SCALING.")
             action = 2 
         else:
             consecutive_blocks += 1
             if pps < 1000: return "MONITORING"
-
             print(f"🛡️ RL Decision: BLOCKING (PPS: {pps})")
             if target_ip:
                 try: requests.post(f"{SENSOR_URL}/block", json={"ip": target_ip}, timeout=2)
@@ -120,7 +110,7 @@ def execute_mitigation(action, pps, target_ip=None):
     return "UNKNOWN"
 
 start_http_server(8000)
-print("🚀 KRRAD Controller Live. AI Defense Hub Active.")
+print("🚀 KRRAD AI Controller Active. System Monitoring Live.")
 while True:
     try:
         r = requests.get(f"{SENSOR_URL}/metrics", timeout=2)
@@ -159,10 +149,7 @@ while True:
     with torch.no_grad(): dnn_conf = dnn_model(features_tensor).item()
     rf_pred, iso_pred = rf_model.predict(features_raw)[0], iso_model.predict(features_raw)[0]
     
-    final_status = 0
-    if rf_pred == 1 and dnn_conf > 0.8: final_status = 1
-    elif dnn_conf > 0.95: final_status = 1
-    elif iso_pred == -1 and pps > 1000: final_status = 2
+    final_status = 1 if dnn_conf > 0.8 or (rf_pred == 1 and pps > 1000) else 0
     
     state = torch.tensor([[min(1.0, pps / 100000), min(1.0, bps / 10000000), min(1.0, pps / 50000), 1.0 if final_status > 0 else 0.0]], dtype=torch.float32)
     with torch.no_grad(): action = torch.argmax(rl_agent(state)).item()
@@ -171,9 +158,7 @@ while True:
     elif final_status >= 1 and action == 0: action = 1
 
     mitigation = execute_mitigation(action, pps, target_ip=potential_attacker_ip)
-
-    status_text = {0: "SAFE", 1: "ATTACK", 2: "SUSPICIOUS"}.get(final_status, "UNKNOWN")
-    if final_status > 0 and pps >= 1000:
-        print(f"🚨 {status_text} (PPS: {pps}) | Action: {mitigation}")
+    if pps >= 1000:
+        print(f"🚨 ALERT (PPS: {pps}) | Mitigation: {mitigation}")
     else:
-        print(f"✅ SAFE (PPS: {pps})")
+        print(f"✅ NORMAL (PPS: {pps})")
