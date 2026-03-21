@@ -60,36 +60,53 @@ try:
 except Exception as e: exit(1)
 
 last_action_time = datetime.datetime.now()
-consecutive_blocks = 0
+observation_start_time = None
+current_threat_ip = None
 
 def execute_mitigation(action, pps, target_ip=None):
-    global last_action_time, IS_SCALED_UP, consecutive_blocks
+    global last_action_time, IS_SCALED_UP, observation_start_time, current_threat_ip
     ACTION_GAUGE.set(action)
     
     if action == 0:
-        consecutive_blocks = 0
+        observation_start_time = None  # Reset observation on safe traffic
         if IS_SCALED_UP and (datetime.datetime.now() - last_action_time).seconds > COOLDOWN_SECONDS:
-            print(f"📉 NORMAL: Restoring baseline scale...")
+            print(f"📉 NORMAL: Restoring baseline scale (1 Replica)...")
             try: k8s_apps_v1.patch_namespaced_deployment_scale(name=SCALING_TARGET, namespace=NAMESPACE, body={"spec": {"replicas": 1}})
             except: pass
             IS_SCALED_UP = False
             last_action_time = datetime.datetime.now()
         return "MONITORING"
 
-    if (datetime.datetime.now() - last_action_time).seconds < 5:
+    # Block new actions if we just finalized a mitigation (like a block)
+    if (datetime.datetime.now() - last_action_time).seconds < 5 and observation_start_time is None:
         return "COOLDOWN"
 
     if action == 1:
-        # If we blocked before but traffic is still high, it's a distributed flood
-        if consecutive_blocks >= 2:
-            action = 2 
+        now = datetime.datetime.now()
+        
+        # Start the Observation Window
+        if observation_start_time is None or current_threat_ip != target_ip:
+            observation_start_time = now
+            current_threat_ip = target_ip
+            print(f"🔍 AI OBSERVATION: Validating threat from {target_ip}. SCALING UP to absorb impact.")
+            try: k8s_apps_v1.patch_namespaced_deployment_scale(name=SCALING_TARGET, namespace=NAMESPACE, body={"spec": {"replicas": 5}})
+            except: pass
+            IS_SCALED_UP = True
+            # Note: We purposely DO NOT update last_action_time here so the countdown logs print smoothly
+            return "OBSERVING"
+        
+        # Check elapsed time in the window
+        elapsed = (now - observation_start_time).seconds
+        if elapsed < 10:
+            print(f"⏳ OBSERVING: {10 - elapsed}s remaining to 100% AI Confidence.")
+            return "OBSERVING"
         else:
-            consecutive_blocks += 1
-            print(f"🛡️ RL Decision: BLOCKING (PPS: {pps})")
-            if target_ip:
-                try: requests.post(f"{SENSOR_URL}/block", json={"ip": target_ip}, timeout=2)
-                except: pass
-                print(f"[MITIGATION] Action: BLOCKING | PPS: {pps} | Target: {target_ip}")
+            # Window closed, execute block
+            print(f"🛡️ AI CONFIDENCE REACHED: Executing BLOCK on {target_ip}")
+            try: requests.post(f"{SENSOR_URL}/block", json={"ip": target_ip}, timeout=2)
+            except: pass
+            print(f"[MITIGATION] Action: BLOCKING | PPS: {pps} | Target: {target_ip}")
+            observation_start_time = None
             last_action_time = datetime.datetime.now()
             return "BLOCKING"
         
@@ -98,14 +115,13 @@ def execute_mitigation(action, pps, target_ip=None):
         try: k8s_apps_v1.patch_namespaced_deployment_scale(name=SCALING_TARGET, namespace=NAMESPACE, body={"spec": {"replicas": 5}})
         except: pass
         IS_SCALED_UP = True
-        consecutive_blocks = 0
         print(f"[MITIGATION] Action: SCALING | PPS: {pps}")
         last_action_time = datetime.datetime.now()
         return "SCALING"
     return "UNKNOWN"
 
 start_http_server(8000)
-print("🚀 KRRAD AI Controller Active. System Monitoring Live.")
+print("🚀 KRRAD AI Controller Active. AI Confidence Observation Window Enabled.")
 while True:
     try:
         r = requests.get(f"{SENSOR_URL}/metrics", timeout=2)
@@ -114,7 +130,7 @@ while True:
             break
     except: time.sleep(2)
 
-last_packets = baseline_data.get('packets', 0)
+last_packets, last_bytes = baseline_data.get('packets', 0), baseline_data.get('bytes', 0)
 last_time = time.monotonic()
 
 while True:
@@ -125,11 +141,10 @@ while True:
     except: continue
 
     curr_time = time.monotonic()
-    dt = curr_time - last_time
-    pps = int((data.get('packets', 0) - last_packets) / dt) if dt > 0 else 0
-    last_packets, last_time = data.get('packets', 0), curr_time
+    pps = int((data.get('packets', 0) - last_packets) / (curr_time - last_time)) if (curr_time - last_time) > 0 else 0
+    last_packets, last_bytes, last_time = data.get('packets', 0), data.get('bytes', 0), curr_time
     
-    # 1500 PPS Safety Buffer (Prevents reset blocks)
+    # Ignore safe background noise
     if pps < 1500:
         if pps > 10: print(f"✅ NORMAL (PPS: {pps})")
         execute_mitigation(0, pps)
@@ -140,8 +155,11 @@ while True:
     features_tensor = torch.tensor(features_scaled, dtype=torch.float32)
     with torch.no_grad(): dnn_conf = dnn_model(features_tensor).item()
     
+    final_status = 1 if dnn_conf > 0.7 else 0
     state = torch.tensor([[min(1.0, pps / 100000), 0, min(1.0, pps / 50000), 1.0]], dtype=torch.float32)
     with torch.no_grad(): action = torch.argmax(rl_agent(state)).item()
 
     mitigation = execute_mitigation(max(1, action), pps, target_ip=potential_attacker_ip)
-    print(f"🚨 ALERT (PPS: {pps}) | Mitigation: {mitigation}")
+    # Print the alert only if it's not the verbose observing loop
+    if mitigation != "OBSERVING":
+        print(f"🚨 ALERT (PPS: {pps}) | Mitigation: {mitigation}")
