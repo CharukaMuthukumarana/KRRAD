@@ -17,19 +17,17 @@ spec:
       serviceAccountName: krrad-controller-sa
       containers:
       - name: controller
-        image: charuka2002/krrad-controller:v2
-        imagePullPolicy: Always
+        # 👇 CHANGED: Use the local image we just built
+        image: krrad-controller:latest
+        # 👇 CHANGED: Stop pulling the old version from the internet
+        imagePullPolicy: IfNotPresent
         env:
-        # 👇 1. Get the Node's Real IP dynamically
         - name: HOST_IP
           valueFrom:
             fieldRef:
               fieldPath: status.hostIP
-        
-        # 👇 2. Use that IP directly (Bypass DNS)
         - name: SENSOR_URL
           value: "http://$(HOST_IP):5000"
-        
         - name: PROMETHEUS_URL
           value: "http://prometheus-service.monitoring.svc.cluster.local:9090"
         ports:

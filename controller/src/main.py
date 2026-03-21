@@ -64,7 +64,6 @@ except Exception as e:
     print(f"⚠️ Warning: K8s Connection Failed: {e}")
     k8s_apps_v1 = None
 
-# Initialize AI Core
 print("Initializing KRRAD AI Core...")
 try:
     scaler = joblib.load(f'{MODELS_DIR}/scaler.pkl')
@@ -84,20 +83,11 @@ except Exception as e:
 last_action_time = datetime.datetime.now()
 consecutive_blocks = 0
 
-def get_safe_ips():
-    # Added common local IPs
-    safe_ips = {"127.0.0.1", "localhost", "0.0.0.0", "192.168.49.1", "10.0.2.2"}
-    k8s_host = os.environ.get("KUBERNETES_SERVICE_HOST")
-    if k8s_host: safe_ips.add(k8s_host)
-    try:
-        with open("/proc/net/route") as fh:
-            for line in fh:
-                fields = line.strip().split()
-                if fields[1] == '00000000': 
-                    gw_ip = socket.inet_ntoa(struct.pack("<L", int(fields[2], 16)))
-                    safe_ips.add(gw_ip)
-    except: pass
-    return safe_ips
+def is_safe_ip(ip):
+    if not ip: return True
+    if str(ip).startswith(('10.', '172.', '192.168.', '127.')):
+        return True
+    return False
 
 def execute_mitigation(action, pps, target_ip=None):
     global last_action_time, IS_SCALED_UP, consecutive_blocks
@@ -124,17 +114,16 @@ def execute_mitigation(action, pps, target_ip=None):
 
     # 1. BLOCKING
     if action == 1:
-        if consecutive_blocks >= 2:
+        if is_safe_ip(target_ip):
+            # 🔥 THE FIX: Instantly escalate to scaling if the IP is a trusted proxy
+            print(f"⚠️ TRUSTED PROXY DETECTED ({target_ip}). Bypassing Block -> Escalating to SCALING.")
+            action = 2 
+        elif consecutive_blocks >= 2:
             print(f"⚠️ BEHAVIOR ANALYSIS: Repeated blocking failed (Swarm Detected). Escalating to SCALING.")
             action = 2 
         else:
             consecutive_blocks += 1
-            if target_ip in get_safe_ips():
-                print(f"⚠️ Ignored BLOCK for Safe IP: {target_ip}")
-                return "MONITORING"
-            
-            # --- FIX: Don't block Google Cloud Health Checks or low traffic ---
-            if pps < 100:
+            if pps < 150:
                 print(f"⚠️ Ignoring Low-PPS Alert ({pps} PPS). Likely Health Check.")
                 return "MONITORING"
 
@@ -143,6 +132,7 @@ def execute_mitigation(action, pps, target_ip=None):
                 try:
                     requests.post(f"{SENSOR_URL}/block", json={"ip": target_ip}, timeout=2)
                     print(f"⛔ Sent BLOCK command for: {target_ip}")
+                    requests.post("http://10.0.2.15:8000/report-action", json={"action": "BLOCKING", "pps": pps}, timeout=1)
                 except Exception as e: print(f"❌ Block Failed: {e}")
             last_action_time = datetime.datetime.now()
             return "BLOCKING"
@@ -158,6 +148,7 @@ def execute_mitigation(action, pps, target_ip=None):
                 IS_SCALED_UP = True
                 consecutive_blocks = 0
                 print("✅ Scaling UP command executed.")
+                requests.post("http://10.0.2.15:8000/report-action", json={"action": "SCALING", "pps": pps}, timeout=1)
             except Exception as e: print(f"❌ Scaling Failed: {e}")
         last_action_time = datetime.datetime.now()
         return "SCALING"
@@ -173,7 +164,7 @@ def get_sensor_data_blocking():
         time.sleep(2)
 
 start_http_server(8000)
-print("🚀 KRRAD Controller Live. v4.2-patched (Stuck-Log & GCP-Fix).")
+print("🚀 KRRAD Controller Live. v4.4-patched (Instant Proxy Escalation).")
 baseline_data = get_sensor_data_blocking()
 last_packets = baseline_data.get('packets', 0)
 last_bytes = baseline_data.get('bytes', 0)
@@ -187,7 +178,6 @@ while True:
         data = response
         potential_attacker_ip = response.get("top_source_ip")
     except Exception as e:
-        # --- FIX: Print warning instead of staying silent ---
         print(f"⚠️ Sensor Unreachable: {e}")
         continue
 
@@ -237,8 +227,7 @@ while True:
     with torch.no_grad():
         action = torch.argmax(rl_agent(state)).item()
 
-    # --- FIX: Ensure Safety Net is Respected ---
-    if pps < 100: 
+    if pps < 150: 
         action = 0
     elif final_status >= 1 and action == 0: 
         action = 1
