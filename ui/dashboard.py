@@ -58,7 +58,7 @@ def send_remote_attack(vector, target_ip):
 
 # --- UI Header ---
 st.title("🛡️ KRRAD Distributed Defense Hub")
-st.caption(f"Collaborative Research Node | Final Year Project - Charuka Muthukumarana")
+st.caption("Collaborative Research Node | Final Year Project - Charuka Muthukumarana")
 
 # --- Section 1: Infrastructure Status ---
 st.header("📋 Infrastructure Status")
@@ -67,7 +67,6 @@ if st.button("🔍 Refresh System Health"):
     data = fetch_from_vm("health")
     if data:
         st.subheader("Live Pod Status")
-        # Ensure we use 'output' key as defined in management_api.py
         st.text(data.get('output', 'No data returned.'))
     else:
         st.error("Backend unreachable. Ensure Port 8000 is open on GCP Firewall.")
@@ -80,16 +79,16 @@ with col_atk:
     st.subheader("🚀 Attack Orchestration")
     with st.container(border=True):
         a_col1, a_col2 = st.columns(2)
-        if a_col1.button("SYN Flood"):
+        if a_col1.button(" SYN Flood"):
             if send_remote_attack("syn_flood", krrad_vm_ip): st.success("SYN Flood Started")
             else: st.error("Attack failed.")
             
-        if a_col2.button("Spoofed SWARM"):
-            if send_remote_attack("swarm_flood", krrad_vm_ip): st.success("UDP Flood Started")
+        if a_col2.button(" Spoofed SWARM"):
+            if send_remote_attack("swarm_flood", krrad_vm_ip): st.success("Swarm Started")
             else: st.error("Attack failed.")
             
-        if a_col1.button("Slowloris"):
-            if send_remote_attack("slowloris", krrad_vm_ip): st.success("HTTP Flood Started")
+        if a_col1.button(" Slowloris"):
+            if send_remote_attack("slowloris", krrad_vm_ip): st.success("Slowloris Started")
             else: st.error("Attack failed.")
             
         if a_col2.button("🛑 STOP ATTACKS", type="secondary"):
@@ -98,13 +97,6 @@ with col_atk:
                 st.info("Stop Command Sent")
             except: 
                 st.error("Attacker Offline")
-
-st.divider()
-st.subheader(" RL Decision Logi")
-st.info("""
-**1. BLOCKING:** Triggered for single-source floods. IP is sent to XDP/eBPF.
-**2. SCALING:** Triggered if blocking fails twice (Swarm Detection). Deployment scales to 5 replicas.
-""")
 
 with col_def:
     st.subheader("🛡️ Defense Operations")
@@ -125,32 +117,40 @@ with col_def:
             else:
                 st.error("Failed to reach Backend API.")
 
-# Mitigation History 
-st.divider()
-st.subheader("📜 RL Mitigation History & Human Feedback")
-
-history_data = fetch_from_vm("history")
-if history_data:
-    df = pd.DataFrame(history_data)
+# --- Mitigation History (Only shows if Backend is connected) ---
+if krrad_vm_ip:
+    st.divider()
+    col_hist_title, col_hist_btn = st.columns([4, 1])
     
-    def color_feedback(val):
-        color = '#00FF00' if val == 'Good Decision' else '#FF0000' if val == 'False Positive' else '#FFFF00'
-        return f'color: {color}'
-    
-    st.dataframe(df.style.map(color_feedback, subset=['feedback']), use_container_width=True, hide_index=True)
-    
-    with st.expander("📝 Provide Feedback for RL Engine (RLHF)"):
-        f_col1, f_col2, f_col3 = st.columns([1, 2, 1])
-        target_id = f_col1.number_input("Action ID", min_value=1, step=1)
-        feedback_val = f_col2.selectbox("Was this decision correct?", ["Good Decision", "False Positive / Overreaction"])
-        if f_col3.button("Submit Feedback"):
-            fetch_from_vm("submit-feedback", method="POST", payload={"id": target_id, "value": feedback_val})
-            st.success(f"Feedback logged for Action {target_id}! In production, this data feeds back into the Replay Buffer.")
-            time.sleep(1)
+    with col_hist_title:
+        st.subheader("📜 RL Mitigation History & Human Feedback")
+        
+    with col_hist_btn:
+        if st.button("🗑️ Clear History"):
+            fetch_from_vm("clear-history", method="POST")
             st.rerun()
-else:
-    st.info("No mitigation actions recorded yet. Launch an attack to generate history.")
 
+    history_data = fetch_from_vm("history")
+    if history_data:
+        df = pd.DataFrame(history_data)
+        
+        def color_feedback(val):
+            color = '#00FF00' if val == 'Good Decision' else '#FF0000' if val == 'False Positive / Overreaction' else '#FFFF00'
+            return f'color: {color}'
+        
+        st.dataframe(df.style.map(color_feedback, subset=['feedback']), use_container_width=True, hide_index=True)
+        
+        with st.expander("📝 Provide Feedback for RL Engine (RLHF)"):
+            f_col1, f_col2, f_col3 = st.columns([1, 2, 1])
+            target_id = f_col1.number_input("Action ID", min_value=1, step=1)
+            feedback_val = f_col2.selectbox("Was this decision correct?", ["Good Decision", "False Positive / Overreaction"])
+            if f_col3.button("Submit Feedback"):
+                fetch_from_vm("submit-feedback", method="POST", payload={"id": target_id, "value": feedback_val})
+                st.success(f"Feedback logged for Action {target_id}!")
+                time.sleep(1)
+                st.rerun()
+    else:
+        st.info("No mitigation actions recorded yet. Launch an attack to generate history.")
 
 # --- Section 3: Real-Time Intelligence ---
 st.divider()
@@ -158,10 +158,9 @@ st.subheader("🧠 Live AI Intelligence Feed")
 
 if st.checkbox("Enable Real-time Stream"):
     log_placeholder = st.empty()
-    for _ in range(30):  # Stream for about a minute
+    for _ in range(30):  
         data = fetch_from_vm("logs")
         if data:
-            # FIXED: Key changed to 'logs' to match management_api.py
             logs = data.get('logs', '')
             pps_match = re.findall(r"PPS: (\d+)", logs)
             current_pps = pps_match[-1] if pps_match else "0"

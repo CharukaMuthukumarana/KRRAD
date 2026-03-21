@@ -5,7 +5,6 @@ import datetime
 
 app = Flask(__name__)
 
-# In-memory storage for the RLHF Demo
 mitigation_history = []
 seen_logs = set()
 
@@ -21,7 +20,6 @@ def logs():
 @app.route('/history', methods=['GET'])
 def get_history():
     global mitigation_history, seen_logs
-    # Fetch a larger chunk of logs to parse history
     logs = subprocess.getoutput("kubectl logs --tail=100 -l app=krrad-controller")
     
     for line in logs.split('\n'):
@@ -39,8 +37,6 @@ def get_history():
                     "pps": pps,
                     "feedback": "Awaiting Admin Review"
                 })
-    
-    # Return reversed list so newest is on top
     return jsonify(mitigation_history[::-1])
 
 @app.route('/submit-feedback', methods=['POST'])
@@ -53,6 +49,14 @@ def feedback():
             item["feedback"] = val
             break
     return jsonify({"status": "updated"})
+
+# --- NEW: Clear History Endpoint ---
+@app.route('/clear-history', methods=['POST'])
+def clear_history():
+    global mitigation_history, seen_logs
+    mitigation_history.clear()
+    seen_logs.clear()
+    return jsonify({"status": "cleared"})
 
 @app.route('/reset', methods=['POST'])
 def reset():
