@@ -71,14 +71,14 @@ col_health1, col_health2 = st.columns(2)
 with col_health1:
     if st.button("🔍 Toggle System Health Table"):
         st.session_state.show_health = not st.session_state.show_health
-
+	
 with col_health2:
     if st.button("🛠️ Auto-Heal Cluster", type="secondary"):
         with st.spinner("Executing Deep Cluster Healing..."):
             res = fetch_from_vm("heal", method="POST")
             if res: st.success(res.get('output'))
 
-if st.session_state.show_health:
+if st.session_state.get('show_health', False):
     with st.container(border=True):
         data = fetch_from_vm("health")
         if data and "pods" in data:
