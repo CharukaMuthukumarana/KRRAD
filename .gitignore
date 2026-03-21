@@ -11,3 +11,8 @@ __pycache__/
 .DS_Store
 .vscode/
 .idea/
+
+*.log
+ui/streamlit.log
+ui/grafana_forward.log
+ui/api.log
