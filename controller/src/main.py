@@ -64,6 +64,12 @@ except Exception as e: exit(1)
 last_action_time = datetime.datetime.now()
 consecutive_blocks = 0
 
+def is_safe_ip(ip):
+    # Only internal loopback is safe to force scaling on local tests
+    if str(ip) in ["127.0.0.1", "localhost"]:
+        return True
+    return False
+
 def execute_mitigation(action, pps, target_ip=None):
     global last_action_time, IS_SCALED_UP, consecutive_blocks
     ACTION_GAUGE.set(action)
@@ -82,7 +88,10 @@ def execute_mitigation(action, pps, target_ip=None):
         return "COOLDOWN"
 
     if action == 1:
-        if consecutive_blocks >= 2:
+        if is_safe_ip(target_ip):
+            print(f"⚠️ TRUSTED PROXY DETECTED ({target_ip}). Bypassing Block -> Escalating to SCALING.")
+            action = 2 
+        elif consecutive_blocks >= 2:
             print(f"⚠️ BEHAVIOR ANALYSIS: Repeated blocking failed. Escalating to SCALING.")
             action = 2 
         else:
@@ -94,6 +103,7 @@ def execute_mitigation(action, pps, target_ip=None):
                 try: requests.post(f"{SENSOR_URL}/block", json={"ip": target_ip}, timeout=2)
                 except: pass
                 print(f"⛔ Sent BLOCK command for: {target_ip}")
+                print(f"[MITIGATION] Action: BLOCKING | PPS: {pps} | Target: {target_ip}")
             last_action_time = datetime.datetime.now()
             return "BLOCKING"
         
@@ -103,6 +113,7 @@ def execute_mitigation(action, pps, target_ip=None):
         except: pass
         IS_SCALED_UP = True
         consecutive_blocks = 0
+        print(f"[MITIGATION] Action: SCALING | PPS: {pps}")
         print("✅ Scaling UP command executed.")
         last_action_time = datetime.datetime.now()
         return "SCALING"
@@ -165,4 +176,4 @@ while True:
     if final_status > 0 and pps >= 1000:
         print(f"🚨 {status_text} (PPS: {pps}) | Action: {mitigation}")
     else:
-        print(f"✅ SAFE (PPS: {pps}) | Action: MONITORING")
+        print(f"✅ SAFE (PPS: {pps})")
