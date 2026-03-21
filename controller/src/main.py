@@ -115,7 +115,6 @@ def execute_mitigation(action, pps, target_ip=None):
     # 1. BLOCKING
     if action == 1:
         if is_safe_ip(target_ip):
-            # 🔥 THE FIX: Instantly escalate to scaling if the IP is a trusted proxy
             print(f"⚠️ TRUSTED PROXY DETECTED ({target_ip}). Bypassing Block -> Escalating to SCALING.")
             action = 2 
         elif consecutive_blocks >= 2:
@@ -132,7 +131,12 @@ def execute_mitigation(action, pps, target_ip=None):
                 try:
                     requests.post(f"{SENSOR_URL}/block", json={"ip": target_ip}, timeout=2)
                     print(f"⛔ Sent BLOCK command for: {target_ip}")
-                    requests.post("http://10.0.2.15:8000/report-action", json={"action": "BLOCKING", "pps": pps}, timeout=1)
+                    
+                    # 🚀 FIX: Silent UI Reporting
+                    host_ip = os.environ.get("HOST_IP", "10.0.2.15")
+                    try: requests.post(f"http://{host_ip}:8000/report-action", json={"action": "BLOCKING", "pps": pps}, timeout=1)
+                    except: pass
+                    
                 except Exception as e: print(f"❌ Block Failed: {e}")
             last_action_time = datetime.datetime.now()
             return "BLOCKING"
@@ -148,7 +152,12 @@ def execute_mitigation(action, pps, target_ip=None):
                 IS_SCALED_UP = True
                 consecutive_blocks = 0
                 print("✅ Scaling UP command executed.")
-                requests.post("http://10.0.2.15:8000/report-action", json={"action": "SCALING", "pps": pps}, timeout=1)
+                
+                # 🚀 FIX: Silent UI Reporting
+                host_ip = os.environ.get("HOST_IP", "10.0.2.15")
+                try: requests.post(f"http://{host_ip}:8000/report-action", json={"action": "SCALING", "pps": pps}, timeout=1)
+                except: pass
+                
             except Exception as e: print(f"❌ Scaling Failed: {e}")
         last_action_time = datetime.datetime.now()
         return "SCALING"
@@ -164,7 +173,7 @@ def get_sensor_data_blocking():
         time.sleep(2)
 
 start_http_server(8000)
-print("🚀 KRRAD Controller Live. v4.4-patched (Instant Proxy Escalation).")
+print("🚀 KRRAD Controller Live. v4.5-patched (Silent-Reporting).")
 baseline_data = get_sensor_data_blocking()
 last_packets = baseline_data.get('packets', 0)
 last_bytes = baseline_data.get('bytes', 0)
@@ -178,7 +187,6 @@ while True:
         data = response
         potential_attacker_ip = response.get("top_source_ip")
     except Exception as e:
-        print(f"⚠️ Sensor Unreachable: {e}")
         continue
 
     curr_time = time.monotonic()
@@ -186,7 +194,6 @@ while True:
     curr_bytes = data.get('bytes', 0)
     
     if curr_packets < last_packets:
-        print("🔄 Sensor Reset Detected. Recalibrating...")
         last_packets = curr_packets
         last_bytes = curr_bytes
         last_time = curr_time
