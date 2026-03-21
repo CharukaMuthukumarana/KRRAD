@@ -8,6 +8,7 @@ import time
 # Page Config
 st.set_page_config(page_title="KRRAD | AI Defense Hub", layout="wide", initial_sidebar_state="expanded")
 
+# --- Session State Initialization ---
 if 'show_health' not in st.session_state:
     st.session_state.show_health = False
 
@@ -33,7 +34,7 @@ with st.sidebar:
         st.warning("Please enter VM IP to fetch data")
     
     st.divider()
-    if st.button("🔄 Hard Reset UI"):
+    if st.button("🔄 Hard Reset UI"): 
         st.rerun()
 
 # --- API Helper Functions ---
@@ -49,16 +50,6 @@ def fetch_from_vm(endpoint, method="GET", payload=None):
     except: 
         return None
 
-def send_remote_attack(vector, target_ip):
-    if not attacker_vm_ip: return False
-    try:
-        url = f"http://{attacker_vm_ip}:5000/launch"
-        payload = {"vector": vector, "target_ip": target_ip, "target_port": "32028"}
-        r = requests.post(url, json=payload, timeout=5)
-        return r.status_code == 200
-    except: 
-        return False
-
 # --- UI Header ---
 st.title("🛡️ KRRAD Distributed Defense Hub")
 st.caption("Collaborative Research Node | Final Year Project - Charuka Muthukumarana")
@@ -67,16 +58,16 @@ st.caption("Collaborative Research Node | Final Year Project - Charuka Muthukuma
 st.header("📋 Infrastructure Status")
 
 col_health1, col_health2 = st.columns(2)
-
 with col_health1:
     if st.button("🔍 Toggle System Health Table"):
         st.session_state.show_health = not st.session_state.show_health
-	
+
 with col_health2:
     if st.button("🛠️ Auto-Heal Cluster", type="secondary"):
         with st.spinner("Executing Deep Cluster Healing..."):
             res = fetch_from_vm("heal", method="POST")
-            if res: st.success(res.get('output'))
+            if res: 
+                st.success(res.get('output'))
 
 if st.session_state.get('show_health', False):
     with st.container(border=True):
@@ -91,8 +82,6 @@ if st.session_state.get('show_health', False):
             if st.button("✖️ Close Table"):
                 st.session_state.show_health = False
                 st.rerun()
-        else:
-            if krrad_vm_ip: st.error("Backend unreachable.")
 
 # --- Section 2: Command & Control ---
 st.divider()
@@ -102,28 +91,26 @@ with col_atk:
     st.subheader("🚀 Attack Orchestration")
     with st.container(border=True):
         a_col1, a_col2 = st.columns(2)
-        if a_col1.button("SYN Flood"):
-            if send_remote_attack("syn_flood", krrad_vm_ip): st.success("SYN Flood Started")
-            else: st.error("Attack failed.")
-            
-        if a_col2.button("Flash Crowd (Scale Test)"):
-            if fetch_from_vm("simulate-swarm", method="POST"): 
-                st.success("Trusted Swarm Started! Watch AI escalate...")
-            else: st.error("Failed to trigger internal swarm.")
-            
-        if a_col1.button("Slowloris"):
-            if send_remote_attack("slowloris", krrad_vm_ip): st.success("Slowloris Started")
-            else: st.error("Attack failed.")
-            
-        if a_col2.button("🛑 STOP ATTACKS", type="secondary"):
-            # Stops internal scaling tests
-            fetch_from_vm("stop-swarm", method="POST")
-            
-            try:
-                requests.post(f"http://{attacker_vm_ip}:5000/stop", timeout=5)
+        if a_col1.button("🌊 Targeted SYN (Block)"):
+            try: 
+                requests.post(f"http://{attacker_vm_ip}:5000/launch", 
+                              json={"vector": "syn_flood", "target_ip": krrad_vm_ip, "target_port": "32028"}, 
+                              timeout=5)
+                st.success("SYN Flood Started! System will Block IP.")
             except: 
-                pass
-            st.info("Stop Command Sent")
+                st.error("Failed to reach Attacker VM.")
+            
+        if a_col2.button("🐝 Flash Crowd (Scale)"):
+            fetch_from_vm("simulate-swarm", method="POST")
+            st.success("Trusted Swarm Started! Watch AI Scale Replicas...")
+            
+        if st.button("🛑 STOP ALL ATTACKS", type="secondary"):
+            fetch_from_vm("stop-swarm", method="POST")
+            try: 
+                requests.post(f"http://{attacker_vm_ip}:5000/stop", timeout=5)
+                st.info("Stop Command Sent. Cooling down...")
+            except: 
+                st.error("Failed to reach Attacker VM.")
 
 with col_def:
     st.subheader("🛡️ Defense Operations")
@@ -136,22 +123,18 @@ with col_def:
                     status.update(label="System Baseline Restored!", state="complete")
                 else:
                     st.error("Failed to reach Backend API.")
-        
+                    
         if st.button("🧠 Restart RL Agent"):
             data = fetch_from_vm("restart-ai", method="POST")
-            if data:
+            if data: 
                 st.toast("AI Controller Restarting...")
-            else:
-                st.error("Failed to reach Backend API.")
 
-# --- Mitigation History (Only shows if Backend is connected) ---
+# --- Section 3: History & Feedback ---
 if krrad_vm_ip:
     st.divider()
     col_hist_title, col_hist_btn = st.columns([4, 1])
-    
-    with col_hist_title:
+    with col_hist_title: 
         st.subheader("📜 RL Mitigation History & Human Feedback")
-        
     with col_hist_btn:
         if st.button("🗑️ Clear History"):
             fetch_from_vm("clear-history", method="POST")
@@ -160,43 +143,52 @@ if krrad_vm_ip:
     history_data = fetch_from_vm("history")
     if history_data:
         df = pd.DataFrame(history_data)
-        
         def color_feedback(val):
-            color = '#00FF00' if val == 'Good Decision' else '#FF0000' if val == 'False Positive / Overreaction' else '#FFFF00'
-            return f'color: {color}'
-        
+            return f"color: {'#00FF00' if val == 'Good Decision' else '#FF0000' if 'False' in val else '#FFFF00'}"
         st.dataframe(df.style.map(color_feedback, subset=['feedback']), use_container_width=True, hide_index=True)
-        
-        with st.expander("📝 Provide Feedback for RL Engine (RLHF)"):
-            f_col1, f_col2, f_col3 = st.columns([1, 2, 1])
-            target_id = f_col1.number_input("Action ID", min_value=1, step=1)
-            feedback_val = f_col2.selectbox("Was this decision correct?", ["Good Decision", "False Positive / Overreaction"])
-            if f_col3.button("Submit Feedback"):
-                fetch_from_vm("submit-feedback", method="POST", payload={"id": target_id, "value": feedback_val})
-                st.success(f"Feedback logged for Action {target_id}!")
-                time.sleep(1)
-                st.rerun()
-    else:
-        st.info("No mitigation actions recorded yet. Launch an attack to generate history.")
 
-# --- Section 3: Real-Time Intelligence ---
+# --- Section 4: Live AI Intelligence Feed ---
 st.divider()
 st.subheader("🧠 Live AI Intelligence Feed")
 
 if st.checkbox("Enable Real-time Stream"):
-    log_placeholder = st.empty()
-    for _ in range(30):  
+    # Create distinct columns to hold the live updating metrics
+    col_metrics, col_logs = st.columns([1, 2])
+    
+    with col_metrics:
+        pps_placeholder = st.empty()
+        st.markdown("<br>", unsafe_allow_html=True)
+        replica_placeholder = st.empty()
+        
+    with col_logs:
+        log_placeholder = st.empty()
+    
+    for _ in range(60):  
+        # 1. Update Replicas
+        health_data = fetch_from_vm("health")
+        if health_data and "pods" in health_data:
+            df_health = pd.DataFrame(health_data["pods"])
+            # Ensure the column matches your API response (usually 'Pod' or 'Pod Name')
+            target_replicas = len(df_health[df_health['Pod'].str.contains('krrad-target', na=False)])
+            
+            with replica_placeholder.container():
+                if target_replicas >= 5:
+                    st.success(f"⚖️ **LIVE TARGET REPLICAS: {target_replicas} / 5 (SCALED UP)**")
+                else:
+                    st.info(f"⚖️ **LIVE TARGET REPLICAS: {target_replicas} / 5 (BASELINE)**")
+
+        # 2. Update Logs
         data = fetch_from_vm("logs")
         if data:
             logs = data.get('logs', '')
             pps_match = re.findall(r"PPS: (\d+)", logs)
             current_pps = pps_match[-1] if pps_match else "0"
             
+            with pps_placeholder.container():
+                st.metric("📈 Detected Traffic", f"{current_pps} PPS")
+                
             with log_placeholder.container():
-                st.metric("Detected Traffic (PPS)", f"{current_pps} pkts/sec")
                 st.code(logs, language="bash")
-        else:
-            st.warning("Waiting for data from API...")
         time.sleep(2)
 else:
     st.info("Log streaming is paused.")
