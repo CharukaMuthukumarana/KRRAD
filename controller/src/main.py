@@ -22,7 +22,7 @@ SENSOR_URL = os.environ.get("SENSOR_URL", "http://krrad-sensor.kube-system:5000"
 MODELS_DIR = "/app/models"
 SCALING_TARGET = "krrad-target"
 NAMESPACE = "default"
-COOLDOWN_SECONDS = 5
+COOLDOWN_SECONDS = 10
 IS_SCALED_UP = False
 
 class KRRAD_DNN(nn.Module):
@@ -71,28 +71,27 @@ def execute_mitigation(action, pps, target_ip=None):
     if action == 0:
         consecutive_blocks = 0
         if IS_SCALED_UP and (datetime.datetime.now() - last_action_time).seconds > COOLDOWN_SECONDS:
-            print(f"📉 SAFE DETECTED: Scaling down to baseline...")
+            print(f"📉 NORMAL: Restoring baseline scale...")
             try: k8s_apps_v1.patch_namespaced_deployment_scale(name=SCALING_TARGET, namespace=NAMESPACE, body={"spec": {"replicas": 1}})
             except: pass
             IS_SCALED_UP = False
             last_action_time = datetime.datetime.now()
         return "MONITORING"
 
-    if (datetime.datetime.now() - last_action_time).seconds < COOLDOWN_SECONDS:
+    if (datetime.datetime.now() - last_action_time).seconds < 5:
         return "COOLDOWN"
 
     if action == 1:
-        if consecutive_blocks >= 1: # Trigger scaling faster for the demonstration
-            print(f"⚠️ BEHAVIOR ANALYSIS: Distributed flood detected. Escalating to SCALING.")
+        # ESCALATION: If blocking internal IP (Proxy) OR repeated failure
+        if str(target_ip).startswith('10.244') or consecutive_blocks >= 1:
+            print(f"⚠️ ESCALATION: Volumetric Flood detected. Switching to SCALING.")
             action = 2 
         else:
             consecutive_blocks += 1
-            if pps < 1000: return "MONITORING"
             print(f"🛡️ RL Decision: BLOCKING (PPS: {pps})")
             if target_ip:
                 try: requests.post(f"{SENSOR_URL}/block", json={"ip": target_ip}, timeout=2)
                 except: pass
-                print(f"⛔ Sent BLOCK command for: {target_ip}")
                 print(f"[MITIGATION] Action: BLOCKING | PPS: {pps} | Target: {target_ip}")
             last_action_time = datetime.datetime.now()
             return "BLOCKING"
@@ -104,13 +103,12 @@ def execute_mitigation(action, pps, target_ip=None):
         IS_SCALED_UP = True
         consecutive_blocks = 0
         print(f"[MITIGATION] Action: SCALING | PPS: {pps}")
-        print("✅ Scaling UP command executed.")
         last_action_time = datetime.datetime.now()
         return "SCALING"
     return "UNKNOWN"
 
 start_http_server(8000)
-print("🚀 KRRAD AI Controller Active. System Monitoring Live.")
+print("🚀 KRRAD AI Controller Active.")
 while True:
     try:
         r = requests.get(f"{SENSOR_URL}/metrics", timeout=2)
@@ -130,35 +128,23 @@ while True:
     except: continue
 
     curr_time = time.monotonic()
-    curr_packets, curr_bytes = data.get('packets', 0), data.get('bytes', 0)
+    pps = int((data.get('packets', 0) - last_packets) / (curr_time - last_time)) if (curr_time - last_time) > 0 else 0
+    last_packets, last_bytes, last_time = data.get('packets', 0), data.get('bytes', 0), curr_time
     
-    if curr_packets < last_packets:
-        last_packets, last_bytes, last_time = curr_packets, curr_bytes, curr_time
+    # 2,500 PPS Safety Buffer (Prevents reset blocks)
+    if pps < 2500:
+        print(f"✅ NORMAL (PPS: {pps})")
+        execute_mitigation(0, pps)
         continue
 
-    dt = curr_time - last_time
-    if dt <= 0: continue
-    pps, bps = int((curr_packets - last_packets) / dt), int((curr_bytes - last_bytes) / dt)
-    last_packets, last_bytes, last_time = curr_packets, curr_bytes, curr_time
-    
-    avg_packet_size = 0 if pps == 0 else bps / pps
-    features_raw = [[pps, bps, pps, avg_packet_size]]
+    features_raw = [[pps, 0, pps, 0]]
     features_scaled = scaler.transform(features_raw)
     features_tensor = torch.tensor(features_scaled, dtype=torch.float32)
-    
     with torch.no_grad(): dnn_conf = dnn_model(features_tensor).item()
-    rf_pred, iso_pred = rf_model.predict(features_raw)[0], iso_model.predict(features_raw)[0]
     
-    final_status = 1 if dnn_conf > 0.8 or (rf_pred == 1 and pps > 1000) else 0
-    
-    state = torch.tensor([[min(1.0, pps / 100000), min(1.0, bps / 10000000), min(1.0, pps / 50000), 1.0 if final_status > 0 else 0.0]], dtype=torch.float32)
+    final_status = 1 if dnn_conf > 0.7 else 0
+    state = torch.tensor([[min(1.0, pps / 100000), 0, min(1.0, pps / 50000), 1.0]], dtype=torch.float32)
     with torch.no_grad(): action = torch.argmax(rl_agent(state)).item()
 
-    if pps < 1000: action = 0
-    elif final_status >= 1 and action == 0: action = 1
-
-    mitigation = execute_mitigation(action, pps, target_ip=potential_attacker_ip)
-    if pps >= 1000:
-        print(f"🚨 ALERT (PPS: {pps}) | Mitigation: {mitigation}")
-    else:
-        print(f"✅ NORMAL (PPS: {pps})")
+    mitigation = execute_mitigation(max(1, action), pps, target_ip=potential_attacker_ip)
+    print(f"🚨 ALERT (PPS: {pps}) | Mitigation: {mitigation}")
