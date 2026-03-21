@@ -12,14 +12,12 @@ from kubernetes import client, config
 
 warnings.filterwarnings("ignore")
 
-# Prometheus Metrics
 PPS_GAUGE = Gauge('krrad_traffic_pps', 'Current Packets Per Second')
 BPS_GAUGE = Gauge('krrad_traffic_bps', 'Current Bytes Per Second')
 ATTACK_GAUGE = Gauge('krrad_attack_status', 'System Threat Status')
 CONFIDENCE_GAUGE = Gauge('krrad_ai_confidence', 'Ensemble Confidence Score')
 ACTION_GAUGE = Gauge('krrad_mitigation_action', 'RL Action Taken (0=Wait, 1=Block, 2=Scale)')
 
-# Configuration
 SENSOR_URL = os.environ.get("SENSOR_URL", "http://krrad-sensor.kube-system:5000")
 MODELS_DIR = "/app/models"
 SCALING_TARGET = "krrad-target"
@@ -61,11 +59,16 @@ try:
     rl_agent = DQN(input_dim=4, output_dim=3)
     rl_agent.load_state_dict(torch.load(f'{MODELS_DIR}/dqn_agent.pth', map_location='cpu'))
     rl_agent.eval()
-except Exception as e:
-    exit(1)
+except Exception as e: exit(1)
 
 last_action_time = datetime.datetime.now()
 consecutive_blocks = 0
+
+def is_safe_ip(ip):
+    if not ip: return True
+    if str(ip).startswith(('10.', '172.', '192.168.', '127.')):
+        return True
+    return False
 
 def execute_mitigation(action, pps, target_ip=None):
     global last_action_time, IS_SCALED_UP, consecutive_blocks
@@ -75,9 +78,8 @@ def execute_mitigation(action, pps, target_ip=None):
         consecutive_blocks = 0
         if IS_SCALED_UP and (datetime.datetime.now() - last_action_time).seconds > COOLDOWN_SECONDS:
             print(f"📉 SAFE DETECTED: Scaling down to baseline...")
-            if k8s_apps_v1:
-                try: k8s_apps_v1.patch_namespaced_deployment_scale(name=SCALING_TARGET, namespace=NAMESPACE, body={"spec": {"replicas": 1}})
-                except: pass
+            try: k8s_apps_v1.patch_namespaced_deployment_scale(name=SCALING_TARGET, namespace=NAMESPACE, body={"spec": {"replicas": 1}})
+            except: pass
             IS_SCALED_UP = False
             last_action_time = datetime.datetime.now()
         return "MONITORING"
@@ -85,46 +87,38 @@ def execute_mitigation(action, pps, target_ip=None):
     if (datetime.datetime.now() - last_action_time).seconds < COOLDOWN_SECONDS:
         return "COOLDOWN"
 
-    # Action 1: BLOCKING
     if action == 1:
-        # If we already tried blocking 2 times and the PPS is still massive, it's a Swarm! Scale up!
-        if consecutive_blocks >= 2:
-            print(f"⚠️ BEHAVIOR ANALYSIS: Repeated blocking failed (Swarm Detected). Escalating to SCALING.")
+        if is_safe_ip(target_ip):
+            print(f"⚠️ TRUSTED PROXY DETECTED ({target_ip}). Bypassing Block -> Escalating to SCALING.")
+            action = 2 
+        elif consecutive_blocks >= 2:
+            print(f"⚠️ BEHAVIOR ANALYSIS: Repeated blocking failed. Escalating to SCALING.")
             action = 2 
         else:
             consecutive_blocks += 1
+            if pps < 1000: return "MONITORING"
+
             print(f"🛡️ RL Decision: BLOCKING (PPS: {pps})")
             if target_ip:
-                try:
-                    requests.post(f"{SENSOR_URL}/block", json={"ip": target_ip}, timeout=2)
-                    print(f"⛔ Sent BLOCK command for: {target_ip}")
-                    host_ip = os.environ.get("HOST_IP", "10.0.2.15")
-                    try: requests.post(f"http://{host_ip}:8000/report-action", json={"action": "BLOCKING", "pps": pps}, timeout=1)
-                    except: pass
+                try: requests.post(f"{SENSOR_URL}/block", json={"ip": target_ip}, timeout=2)
                 except: pass
+                print(f"⛔ Sent BLOCK command for: {target_ip}")
             last_action_time = datetime.datetime.now()
             return "BLOCKING"
         
-    # Action 2: SCALING
     if action == 2:
         print(f"⚖️ RL Decision: SCALING (PPS: {pps})")
-        if k8s_apps_v1:
-            try:
-                k8s_apps_v1.patch_namespaced_deployment_scale(name=SCALING_TARGET, namespace=NAMESPACE, body={"spec": {"replicas": 5}})
-                IS_SCALED_UP = True
-                consecutive_blocks = 0
-                print("✅ Scaling UP command executed.")
-                host_ip = os.environ.get("HOST_IP", "10.0.2.15")
-                try: requests.post(f"http://{host_ip}:8000/report-action", json={"action": "SCALING", "pps": pps}, timeout=1)
-                except: pass
-            except: pass
+        try: k8s_apps_v1.patch_namespaced_deployment_scale(name=SCALING_TARGET, namespace=NAMESPACE, body={"spec": {"replicas": 5}})
+        except: pass
+        IS_SCALED_UP = True
+        consecutive_blocks = 0
+        print("✅ Scaling UP command executed.")
         last_action_time = datetime.datetime.now()
         return "SCALING"
-
     return "UNKNOWN"
 
 start_http_server(8000)
-print("🚀 KRRAD Controller Live. v5.0-FINAL (Math-Based Thresholds).")
+print("🚀 KRRAD Controller Live. AI Defense Hub Active.")
 while True:
     try:
         r = requests.get(f"{SENSOR_URL}/metrics", timeout=2)
@@ -171,12 +165,8 @@ while True:
     state = torch.tensor([[min(1.0, pps / 100000), min(1.0, bps / 10000000), min(1.0, pps / 50000), 1.0 if final_status > 0 else 0.0]], dtype=torch.float32)
     with torch.no_grad(): action = torch.argmax(rl_agent(state)).item()
 
-    # 🔥 THE FIX: Mathematical Threshold. If under 1000 PPS, force MONITORING (0). 
-    # This completely ignores reset spikes!
-    if pps < 1000: 
-        action = 0
-    elif final_status >= 1 and action == 0: 
-        action = 1
+    if pps < 1000: action = 0
+    elif final_status >= 1 and action == 0: action = 1
 
     mitigation = execute_mitigation(action, pps, target_ip=potential_attacker_ip)
 
