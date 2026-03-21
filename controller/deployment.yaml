@@ -17,9 +17,7 @@ spec:
       serviceAccountName: krrad-controller-sa
       containers:
       - name: controller
-        # 👇 CHANGED: Use the local image we just built
         image: krrad-controller:latest
-        # 👇 CHANGED: Stop pulling the old version from the internet
         imagePullPolicy: IfNotPresent
         env:
         - name: HOST_IP

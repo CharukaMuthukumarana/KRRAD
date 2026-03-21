@@ -64,12 +64,6 @@ except Exception as e: exit(1)
 last_action_time = datetime.datetime.now()
 consecutive_blocks = 0
 
-def is_safe_ip(ip):
-    if not ip: return True
-    if str(ip).startswith(('10.', '172.', '192.168.', '127.')):
-        return True
-    return False
-
 def execute_mitigation(action, pps, target_ip=None):
     global last_action_time, IS_SCALED_UP, consecutive_blocks
     ACTION_GAUGE.set(action)
@@ -88,10 +82,7 @@ def execute_mitigation(action, pps, target_ip=None):
         return "COOLDOWN"
 
     if action == 1:
-        if is_safe_ip(target_ip):
-            print(f"⚠️ TRUSTED PROXY DETECTED ({target_ip}). Bypassing Block -> Escalating to SCALING.")
-            action = 2 
-        elif consecutive_blocks >= 2:
+        if consecutive_blocks >= 2:
             print(f"⚠️ BEHAVIOR ANALYSIS: Repeated blocking failed. Escalating to SCALING.")
             action = 2 
         else:
