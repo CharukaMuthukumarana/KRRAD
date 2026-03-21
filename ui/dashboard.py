@@ -80,16 +80,16 @@ with col_atk:
     st.subheader("🚀 Attack Orchestration")
     with st.container(border=True):
         a_col1, a_col2 = st.columns(2)
-        if a_col1.button("🌊 SYN Flood"):
+        if a_col1.button("SYN Flood"):
             if send_remote_attack("syn_flood", krrad_vm_ip): st.success("SYN Flood Started")
             else: st.error("Attack failed.")
             
-        if a_col2.button("🚀 UDP Flood"):
-            if send_remote_attack("udp_flood", krrad_vm_ip): st.success("UDP Flood Started")
+        if a_col2.button("Spoofed SWARM"):
+            if send_remote_attack("swarm_flood", krrad_vm_ip): st.success("UDP Flood Started")
             else: st.error("Attack failed.")
             
-        if a_col1.button("🔥 HTTP Flood"):
-            if send_remote_attack("http_flood", krrad_vm_ip): st.success("HTTP Flood Started")
+        if a_col1.button("Slowloris"):
+            if send_remote_attack("slowloris", krrad_vm_ip): st.success("HTTP Flood Started")
             else: st.error("Attack failed.")
             
         if a_col2.button("🛑 STOP ATTACKS", type="secondary"):
@@ -98,6 +98,13 @@ with col_atk:
                 st.info("Stop Command Sent")
             except: 
                 st.error("Attacker Offline")
+
+st.divider()
+st.subheader(" RL Decision Logi")
+st.info("""
+**1. BLOCKING:** Triggered for single-source floods. IP is sent to XDP/eBPF.
+**2. SCALING:** Triggered if blocking fails twice (Swarm Detection). Deployment scales to 5 replicas.
+""")
 
 with col_def:
     st.subheader("🛡️ Defense Operations")
@@ -112,12 +119,38 @@ with col_def:
                     st.error("Failed to reach Backend API.")
         
         if st.button("🧠 Restart RL Agent"):
-            # FIXED: Endpoint changed to match management_api.py route
             data = fetch_from_vm("restart-ai", method="POST")
             if data:
                 st.toast("AI Controller Restarting...")
             else:
                 st.error("Failed to reach Backend API.")
+
+# Mitigation History 
+st.divider()
+st.subheader("📜 RL Mitigation History & Human Feedback")
+
+history_data = fetch_from_vm("history")
+if history_data:
+    df = pd.DataFrame(history_data)
+    
+    def color_feedback(val):
+        color = '#00FF00' if val == 'Good Decision' else '#FF0000' if val == 'False Positive' else '#FFFF00'
+        return f'color: {color}'
+    
+    st.dataframe(df.style.map(color_feedback, subset=['feedback']), use_container_width=True, hide_index=True)
+    
+    with st.expander("📝 Provide Feedback for RL Engine (RLHF)"):
+        f_col1, f_col2, f_col3 = st.columns([1, 2, 1])
+        target_id = f_col1.number_input("Action ID", min_value=1, step=1)
+        feedback_val = f_col2.selectbox("Was this decision correct?", ["Good Decision", "False Positive / Overreaction"])
+        if f_col3.button("Submit Feedback"):
+            fetch_from_vm("submit-feedback", method="POST", payload={"id": target_id, "value": feedback_val})
+            st.success(f"Feedback logged for Action {target_id}! In production, this data feeds back into the Replay Buffer.")
+            time.sleep(1)
+            st.rerun()
+else:
+    st.info("No mitigation actions recorded yet. Launch an attack to generate history.")
+
 
 # --- Section 3: Real-Time Intelligence ---
 st.divider()
