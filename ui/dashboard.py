@@ -8,6 +8,9 @@ import time
 # Page Config
 st.set_page_config(page_title="KRRAD | AI Defense Hub", layout="wide", initial_sidebar_state="expanded")
 
+if 'show_health' not in st.session_state:
+    st.session_state.show_health = False
+
 # --- Enhanced Styling ---
 st.markdown("""
     <style>
