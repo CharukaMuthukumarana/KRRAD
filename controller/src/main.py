@@ -54,8 +54,6 @@ try:
     dnn_model = KRRAD_DNN(input_dim=4)
     dnn_model.load_state_dict(torch.load(f'{MODELS_DIR}/dnn_model.pth', map_location='cpu'))
     dnn_model.eval()
-    rf_model = joblib.load(f'{MODELS_DIR}/rf_model_big.pkl')
-    iso_model = joblib.load(f'{MODELS_DIR}/iso_model_big.pkl')
     rl_agent = DQN(input_dim=4, output_dim=3)
     rl_agent.load_state_dict(torch.load(f'{MODELS_DIR}/dqn_agent.pth', map_location='cpu'))
     rl_agent.eval()
@@ -82,9 +80,8 @@ def execute_mitigation(action, pps, target_ip=None):
         return "COOLDOWN"
 
     if action == 1:
-        # ESCALATION: If blocking internal IP (Proxy) OR repeated failure
-        if str(target_ip).startswith('10.244') or consecutive_blocks >= 1:
-            print(f"⚠️ ESCALATION: Volumetric Flood detected. Switching to SCALING.")
+        # If we blocked before but traffic is still high, it's a distributed flood
+        if consecutive_blocks >= 2:
             action = 2 
         else:
             consecutive_blocks += 1
@@ -108,7 +105,7 @@ def execute_mitigation(action, pps, target_ip=None):
     return "UNKNOWN"
 
 start_http_server(8000)
-print("🚀 KRRAD AI Controller Active.")
+print("🚀 KRRAD AI Controller Active. System Monitoring Live.")
 while True:
     try:
         r = requests.get(f"{SENSOR_URL}/metrics", timeout=2)
@@ -117,7 +114,7 @@ while True:
             break
     except: time.sleep(2)
 
-last_packets, last_bytes = baseline_data.get('packets', 0), baseline_data.get('bytes', 0)
+last_packets = baseline_data.get('packets', 0)
 last_time = time.monotonic()
 
 while True:
@@ -128,12 +125,13 @@ while True:
     except: continue
 
     curr_time = time.monotonic()
-    pps = int((data.get('packets', 0) - last_packets) / (curr_time - last_time)) if (curr_time - last_time) > 0 else 0
-    last_packets, last_bytes, last_time = data.get('packets', 0), data.get('bytes', 0), curr_time
+    dt = curr_time - last_time
+    pps = int((data.get('packets', 0) - last_packets) / dt) if dt > 0 else 0
+    last_packets, last_time = data.get('packets', 0), curr_time
     
-    # 2,500 PPS Safety Buffer (Prevents reset blocks)
-    if pps < 2500:
-        print(f"✅ NORMAL (PPS: {pps})")
+    # 1500 PPS Safety Buffer (Prevents reset blocks)
+    if pps < 1500:
+        if pps > 10: print(f"✅ NORMAL (PPS: {pps})")
         execute_mitigation(0, pps)
         continue
 
@@ -142,7 +140,6 @@ while True:
     features_tensor = torch.tensor(features_scaled, dtype=torch.float32)
     with torch.no_grad(): dnn_conf = dnn_model(features_tensor).item()
     
-    final_status = 1 if dnn_conf > 0.7 else 0
     state = torch.tensor([[min(1.0, pps / 100000), 0, min(1.0, pps / 50000), 1.0]], dtype=torch.float32)
     with torch.no_grad(): action = torch.argmax(rl_agent(state)).item()
 
