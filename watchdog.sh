@@ -1,13 +1,13 @@
 #!/bin/bash
-echo "🛡️ KRRAD Watchdog Started. Monitoring cluster health..."
+echo "🛡️ KRRAD Watchdog Started. Monitoring strict cluster health..."
 
 while true; do
     sleep 60
-    # Find only pods that have explicitly crashed
-    CRASHED=$(kubectl get pods -A | awk '/CrashLoopBackOff|Error/ {print $2 " -n " $1}')
+    # Find crashed pods OR pods where ready containers don't match total (e.g., 1/2)
+    UNHEALTHY=$(kubectl get pods -A | awk 'NR>1 {split($3,a,"/"); if ($4=="CrashLoopBackOff" || $4=="Error" || a[1]!=a[2]) print $2 " -n " $1}')
     
-    if [ ! -z "$CRASHED" ]; then
-        echo "[$(date)] ⚠️ Watchdog found crashed pods. Restarting..."
-        echo "$CRASHED" | xargs -L 1 kubectl delete pod --ignore-not-found
+    if [ ! -z "$UNHEALTHY" ]; then
+        echo "[$(date)] ⚠️ Watchdog found unhealthy pods. Executing self-healing..."
+        echo "$UNHEALTHY" | xargs -L 1 kubectl delete pod --ignore-not-found
     fi
 done

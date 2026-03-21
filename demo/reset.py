@@ -1,37 +1,27 @@
 import subprocess
 import time
-import sys
-
-def run_command(cmd):
-    try:
-        # Run command and hide output unless there is an error
-        subprocess.check_call(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except subprocess.CalledProcessError:
-        print(f"⚠️  Warning: Command failed (maybe it was already done?): {cmd}")
 
 print("🔄 KRRAD: System Reset & Cleanup")
 print("--------------------------------------------------")
 
-# 1. Reset Scaling (Target -> 1 Replica)
+# 1. Reset Target Scaling
 print("📉 Scaling down 'krrad-target' to 1 replica...")
-run_command("kubectl scale deployment krrad-target --replicas=1")
+subprocess.run("kubectl scale deployment krrad-target --replicas=1", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-# 2. Unblock IPs (Restart Sensor)
-print("🧹 Clearing Blocklists (Restarting Sensors)...")
-run_command("kubectl delete pod -n kube-system -l app=krrad-sensor")
+# 2. Unblock IPs
+print("🧹 Flushing eBPF Blacklists...")
+pod_name = subprocess.getoutput("kubectl get pod -n kube-system -l app=krrad-sensor -o jsonpath='{.items[0].metadata.name}'")
 
-# 3. Wait for Readiness
-print("⏳ Waiting for system to come back online...")
-print("   - Waiting for Sensor...")
-# specific command to wait until the new pods are actually 'Ready'
-try:
-    subprocess.run("kubectl wait --for=condition=ready pod -n kube-system -l app=krrad-sensor --timeout=60s", 
-                   shell=True, check=True, stdout=subprocess.DEVNULL)
-except:
-    # If wait fails, just sleep a bit more
-    time.sleep(5)
+if "krrad-sensor" in pod_name:
+    # We use Python's urllib inside the container instead of curl to guarantee it executes
+    unblock_cmd = f"""kubectl exec -n kube-system {pod_name} -- python3 -c "import urllib.request; req = urllib.request.Request('http://localhost:5000/unblock_all', method='POST'); res = urllib.request.urlopen(req); print(res.read().decode('utf-8'))" """
+    
+    result = subprocess.getoutput(unblock_cmd)
+    print(f"✅ Unblock API Response: {result}")
+else:
+    print("❌ Critical Error: Could not find krrad-sensor pod!")
 
-print("   - Waiting for Target...")
+# 3. Wait for Target
 try:
     subprocess.run("kubectl wait --for=condition=ready pod -l app=krrad-target --timeout=60s", 
                    shell=True, check=True, stdout=subprocess.DEVNULL)
@@ -39,4 +29,4 @@ except:
     pass
 
 print("--------------------------------------------------")
-print("✅ SYSTEM RESET COMPLETE. Ready for next test.")
+print("✅ SYSTEM RESET COMPLETE.")

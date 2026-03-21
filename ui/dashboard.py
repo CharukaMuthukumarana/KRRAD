@@ -63,13 +63,31 @@ st.caption("Collaborative Research Node | Final Year Project - Charuka Muthukuma
 # --- Section 1: Infrastructure Status ---
 st.header("📋 Infrastructure Status")
 
-if st.button("🔍 Refresh System Health"):
-    data = fetch_from_vm("health")
-    if data:
-        st.subheader("Live Pod Status")
-        st.text(data.get('output', 'No data returned.'))
-    else:
-        st.error("Backend unreachable. Ensure Port 8000 is open on GCP Firewall.")
+col_health1, col_health2 = st.columns(2)
+
+with col_health1:
+    if st.button("🔍Check System Health"):
+        st.session_state['refresh'] = True
+
+with col_health2:
+    if st.button("🛠️ Auto-Heal Cluster", type="secondary"):
+        with st.spinner("Executing Deep Cluster Healing..."):
+            data = fetch_from_vm("heal", method="POST")
+            if data:
+                st.success(data.get('output'))
+                time.sleep(2)
+
+# Always fetch health dynamically
+data = fetch_from_vm("health")
+if data and "pods" in data:
+    df = pd.DataFrame(data["pods"])
+    def color_health(val):
+        if '✅' in val: return 'color: #00FF00'
+        if '⚠️' in val: return 'color: #FFFF00'
+        return 'color: #FF0000'
+    st.dataframe(df.style.map(color_health, subset=['Health']), use_container_width=True, hide_index=True)
+else:
+    if krrad_vm_ip: st.error("Backend unreachable. Ensure Port 8000 is open on GCP Firewall.")
 
 # --- Section 2: Command & Control ---
 st.divider()

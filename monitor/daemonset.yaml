@@ -16,12 +16,11 @@ spec:
       hostPID: true
       containers:
       - name: sensor
-        image: charuka2002/krrad-sensor:v2
-        imagePullPolicy: Always
+        image: krrad-sensor:latest
+        imagePullPolicy: IfNotPresent
         securityContext:
           privileged: true
         env:
-        # 👇 CHANGED: Listen on the internal bridge
         - name: INTERFACE
           value: "bridge"
         - name: XDP_MODE
@@ -32,32 +31,20 @@ spec:
         - |
           set -e
           echo "🔧 Manual Setup: Linking Kernel Headers..."
-          
           CURRENT_KERNEL=$(uname -r)
-          echo "   Host Kernel: $CURRENT_KERNEL"
-          
           INSTALLED_HEADERS=$(find /usr/src -maxdepth 1 -name "linux-headers-$CURRENT_KERNEL" -type d | head -n 1)
-          
           if [ -z "$INSTALLED_HEADERS" ]; then
-             echo "⚠️ Exact match not found. Trying loose match..."
              INSTALLED_HEADERS=$(find /usr/src -maxdepth 1 -name "linux-headers-*" -type d | head -n 1)
           fi
-
           if [ -z "$INSTALLED_HEADERS" ]; then
              echo "❌ CRITICAL: No linux-headers found in /usr/src!"
-             ls -l /usr/src
              exit 1
           fi
-          
-          echo "   Using Headers: $INSTALLED_HEADERS"
-          
           mkdir -p /lib/modules/$CURRENT_KERNEL
           rm -f /lib/modules/$CURRENT_KERNEL/build
           ln -s $INSTALLED_HEADERS /lib/modules/$CURRENT_KERNEL/build
-          
           echo "🚀 Starting KRRAD Sensor..."
           python3 src/loader.py
-        
         volumeMounts:
         - name: sys-fs-bpf
           mountPath: /sys/fs/bpf
