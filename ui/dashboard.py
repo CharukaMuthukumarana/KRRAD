@@ -146,6 +146,17 @@ if krrad_vm_ip:
         def color_feedback(val):
             return f"color: {'#00FF00' if val == 'Good Decision' else '#FF0000' if 'False' in val else '#FFFF00'}"
         st.dataframe(df.style.map(color_feedback, subset=['feedback']), use_container_width=True, hide_index=True)
+	with st.expander("📝 Provide Feedback for RL Engine (RLHF)"):
+            f_col1, f_col2, f_col3 = st.columns([1, 2, 1])
+            target_id = f_col1.number_input("Action ID", min_value=1, step=1)
+            feedback_val = f_col2.selectbox("Was this decision correct?", ["Good Decision", "False Positive / Overreaction"])
+            if f_col3.button("Submit Feedback"):
+                fetch_from_vm("submit-feedback", method="POST", payload={"id": target_id, "value": feedback_val})
+                st.success(f"Feedback logged for Action {target_id}!")
+                time.sleep(1)
+                st.rerun()
+    else:
+        st.info("No mitigation actions recorded yet. Launch an attack to generate history.")
 
 # --- Section 4: Live AI Intelligence Feed ---
 st.divider()
