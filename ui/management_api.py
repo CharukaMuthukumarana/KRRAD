@@ -5,6 +5,7 @@ import datetime
 
 app = Flask(__name__)
 mitigation_history = []
+seen_logs = set()
 
 @app.route('/health', methods=['GET'])
 def health():
@@ -14,7 +15,7 @@ def health():
         parts = line.split()
         if len(parts) >= 6:
             ns, name, ready, status = parts[0], parts[1], parts[2], parts[3]
-            health_stat = f"❌ {status}" if status != "Running" else ("✅ Ready" if ready.split('/')[0] == ready.split('/')[1] else "⚠️ Partial/Crashing")
+            health_stat = f"✅ Ready" if status == "Running" and ready.split('/')[0] == ready.split('/')[1] else f"❌ {status}"
             pods.append({"Namespace": ns, "Pod": name, "Ready": ready, "Status": status, "Health": health_stat})
     return jsonify({"pods": pods, "raw": output})
 
@@ -24,49 +25,49 @@ def logs():
 
 @app.route('/history', methods=['GET'])
 def get_history():
+    global mitigation_history, seen_logs
+    logs = subprocess.getoutput("kubectl logs --tail=150 -l app=krrad-controller")
+    for line in logs.split('\n'):
+        if "[MITIGATION]" in line and line not in seen_logs:
+            seen_logs.add(line)
+            act_m = re.search(r"Action: (\w+)", line)
+            pps_m = re.search(r"PPS: (\d+)", line)
+            tgt_m = re.search(r"Target: ([\d\.]+)", line)
+            mitigation_history.append({
+                "id": len(mitigation_history) + 1,
+                "timestamp": datetime.datetime.now().strftime("%H:%M:%S"),
+                "action": act_m.group(1) if act_m else "Unknown",
+                "pps": pps_m.group(1) if pps_m else "0",
+                "target": tgt_m.group(1) if tgt_m else "Distributed",
+                "feedback": "Awaiting Review"
+            })
     return jsonify(mitigation_history[::-1])
-
-@app.route('/report-action', methods=['POST'])
-def report_action():
-    data = request.json
-    mitigation_history.append({
-        "id": len(mitigation_history) + 1,
-        "timestamp": datetime.datetime.now().strftime("%H:%M:%S"),
-        "action": data.get("action"),
-        "pps": data.get("pps"),
-        "feedback": "Awaiting Admin Review"
-    })
-    return jsonify({"status": "logged"})
-
-@app.route('/submit-feedback', methods=['POST'])
-def feedback():
-    data = request.json
-    for item in mitigation_history:
-        if item["id"] == data.get("id"):
-            item["feedback"] = data.get("value")
-            break
-    return jsonify({"status": "updated"})
-
-@app.route('/clear-history', methods=['POST'])
-def clear_history():
-    mitigation_history.clear()
-    return jsonify({"status": "cleared"})
 
 @app.route('/simulate-swarm', methods=['POST'])
 def simulate_swarm():
-    # 🔥 VIVA FIX: Strict 127.0.0.1 traffic to guarantee Scale Up logic
-    cmd = "docker run --rm -d --name swarm_flood --net=host alpine sh -c 'apk add --no-cache hping3 && hping3 -S --flood -p 32028 127.0.0.1'"
+    # Use the VM's main IP and the NodePort to ensure the sensor sees it
+    target_ip = subprocess.getoutput("hostname -I | awk '{print $1}'")
+    cmd = f"docker run --rm -d --name swarm_flood --net=host debian:bookworm-slim sh -c 'apt-get update && apt-get install -y hping3 && hping3 -S --flood --rand-source -p 32028 {target_ip}'"
     subprocess.Popen(cmd, shell=True)
-    return jsonify({"status": "Swarm simulated"})
+    return jsonify({"status": "Swarm simulation started"})
 
 @app.route('/stop-swarm', methods=['POST'])
 def stop_swarm():
     subprocess.getoutput("docker rm -f swarm_flood")
     return jsonify({"status": "stopped"})
 
+@app.route('/clear-history', methods=['POST'])
+def clear_history():
+    global mitigation_history, seen_logs
+    mitigation_history.clear()
+    seen_logs.clear()
+    return jsonify({"status": "cleared"})
+
 @app.route('/reset', methods=['POST'])
 def reset():
+    global mitigation_history, seen_logs
     mitigation_history.clear()
+    seen_logs.clear()
     return jsonify({"output": subprocess.getoutput("python3 /home/charuka2002buss/KRRAD/demo/reset.py")})
 
 @app.route('/restart-ai', methods=['POST'])
@@ -78,6 +79,15 @@ def heal():
     subprocess.getoutput("kubectl delete pvc -l app.kubernetes.io/name=prometheus -n default --ignore-not-found")
     subprocess.getoutput("kubectl get pods -A | awk 'NR>1 {split($3,a,\"/\"); if(a[1]!=a[2] || $4!=\"Running\") print $2 \" -n \" $1}' | xargs -L 1 kubectl delete pod --ignore-not-found")
     return jsonify({"output": "Cluster Auto-Heal Executed."})
+
+@app.route('/submit-feedback', methods=['POST'])
+def feedback():
+    data = request.json
+    for item in mitigation_history:
+        if item["id"] == data.get("id"):
+            item["feedback"] = data.get("value")
+            break
+    return jsonify({"status": "updated"})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8000)
