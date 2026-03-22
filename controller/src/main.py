@@ -54,6 +54,8 @@ try:
     dnn_model = KRRAD_DNN(input_dim=4)
     dnn_model.load_state_dict(torch.load(f'{MODELS_DIR}/dnn_model.pth', map_location='cpu'))
     dnn_model.eval()
+    rf_model = joblib.load(f'{MODELS_DIR}/rf_model_big.pkl')
+    iso_model = joblib.load(f'{MODELS_DIR}/iso_model_big.pkl')
     rl_agent = DQN(input_dim=4, output_dim=3)
     rl_agent.load_state_dict(torch.load(f'{MODELS_DIR}/dqn_agent.pth', map_location='cpu'))
     rl_agent.eval()
@@ -68,7 +70,7 @@ def execute_mitigation(action, pps, target_ip=None):
     ACTION_GAUGE.set(action)
     
     if action == 0:
-        observation_start_time = None  # Reset observation on safe traffic
+        observation_start_time = None  
         if IS_SCALED_UP and (datetime.datetime.now() - last_action_time).seconds > COOLDOWN_SECONDS:
             print(f"📉 NORMAL: Restoring baseline scale (1 Replica)...")
             try: k8s_apps_v1.patch_namespaced_deployment_scale(name=SCALING_TARGET, namespace=NAMESPACE, body={"spec": {"replicas": 1}})
@@ -77,14 +79,11 @@ def execute_mitigation(action, pps, target_ip=None):
             last_action_time = datetime.datetime.now()
         return "MONITORING"
 
-    # Block new actions if we just finalized a mitigation (like a block)
     if (datetime.datetime.now() - last_action_time).seconds < 5 and observation_start_time is None:
         return "COOLDOWN"
 
     if action == 1:
         now = datetime.datetime.now()
-        
-        # Start the Observation Window
         if observation_start_time is None or current_threat_ip != target_ip:
             observation_start_time = now
             current_threat_ip = target_ip
@@ -92,16 +91,13 @@ def execute_mitigation(action, pps, target_ip=None):
             try: k8s_apps_v1.patch_namespaced_deployment_scale(name=SCALING_TARGET, namespace=NAMESPACE, body={"spec": {"replicas": 5}})
             except: pass
             IS_SCALED_UP = True
-            # Note: We purposely DO NOT update last_action_time here so the countdown logs print smoothly
             return "OBSERVING"
         
-        # Check elapsed time in the window
         elapsed = (now - observation_start_time).seconds
         if elapsed < 10:
             print(f"⏳ OBSERVING: {10 - elapsed}s remaining to 100% AI Confidence.")
             return "OBSERVING"
         else:
-            # Window closed, execute block
             print(f"🛡️ AI CONFIDENCE REACHED: Executing BLOCK on {target_ip}")
             try: requests.post(f"{SENSOR_URL}/block", json={"ip": target_ip}, timeout=2)
             except: pass
@@ -121,7 +117,7 @@ def execute_mitigation(action, pps, target_ip=None):
     return "UNKNOWN"
 
 start_http_server(8000)
-print("🚀 KRRAD AI Controller Active. AI Confidence Observation Window Enabled.")
+print("🚀 KRRAD AI Controller Active. Full ML Ensemble Enabled.")
 while True:
     try:
         r = requests.get(f"{SENSOR_URL}/metrics", timeout=2)
@@ -144,22 +140,37 @@ while True:
     pps = int((data.get('packets', 0) - last_packets) / (curr_time - last_time)) if (curr_time - last_time) > 0 else 0
     last_packets, last_bytes, last_time = data.get('packets', 0), data.get('bytes', 0), curr_time
     
-    # Ignore safe background noise
     if pps < 1500:
         if pps > 10: print(f"✅ NORMAL (PPS: {pps})")
         execute_mitigation(0, pps)
         continue
 
+    # 1. Feature Engineering
     features_raw = [[pps, 0, pps, 0]]
     features_scaled = scaler.transform(features_raw)
     features_tensor = torch.tensor(features_scaled, dtype=torch.float32)
+    
+    # 2. AI Ensemble Voting System
+    # A) Deep Neural Network Prediction
     with torch.no_grad(): dnn_conf = dnn_model(features_tensor).item()
     
-    final_status = 1 if dnn_conf > 0.7 else 0
-    state = torch.tensor([[min(1.0, pps / 100000), 0, min(1.0, pps / 50000), 1.0]], dtype=torch.float32)
+    # B) Random Forest Prediction (1 = Attack, 0 = Normal)
+    rf_pred = rf_model.predict(features_raw)[0]
+    
+    # C) Isolation Forest Prediction (-1 = Anomaly/Attack, 1 = Normal)
+    iso_pred = iso_model.predict(features_raw)[0]
+    
+    # Decision Logic: If DNN is highly confident (>80%), OR if DNN is moderately confident (>60%) AND both RF & ISO agree it's an anomaly.
+    final_status = 0
+    if dnn_conf > 0.8:
+        final_status = 1
+    elif dnn_conf > 0.6 and rf_pred == 1 and iso_pred == -1:
+        final_status = 1
+
+    # 3. RL Agent State mapping
+    state = torch.tensor([[min(1.0, pps / 100000), 0, min(1.0, pps / 50000), 1.0 if final_status > 0 else 0.0]], dtype=torch.float32)
     with torch.no_grad(): action = torch.argmax(rl_agent(state)).item()
 
     mitigation = execute_mitigation(max(1, action), pps, target_ip=potential_attacker_ip)
-    # Print the alert only if it's not the verbose observing loop
     if mitigation != "OBSERVING":
         print(f"🚨 ALERT (PPS: {pps}) | Mitigation: {mitigation}")
