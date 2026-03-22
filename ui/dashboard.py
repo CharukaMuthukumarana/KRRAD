@@ -83,6 +83,14 @@ if krrad_vm_ip:
     hist = fetch_from_vm("history")
     if hist:
         st.dataframe(pd.DataFrame(hist), use_container_width=True, hide_index=True)
+        
+        with st.expander("📝 Submit Feedback"):
+            f_c1, f_c2, f_c3 = st.columns([1, 2, 1])
+            tid = f_c1.number_input("Action ID", min_value=1, step=1)
+            fval = f_c2.selectbox("Decision", ["Good Decision", "False Positive"])
+            if f_c3.button("Submit"):
+                fetch_from_vm("submit-feedback", method="POST", payload={"id": tid, "value": fval})
+                st.rerun()
 
 st.divider()
 st.subheader("🧠 Live Stream")
