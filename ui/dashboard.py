@@ -39,14 +39,71 @@ def fetch_from_vm(endpoint, method="GET", payload=None):
 
 st.title("🛡️ KRRAD AI Defense Hub")
 
-st.header("📋 Infrastructure")
-col_h1, col_h2 = st.columns(2)
-with col_h1:
-    if st.button("🔍 Toggle Health Table"):
-        st.session_state.show_health = not st.session_state.show_health
-with col_h2:
-    if st.button("🛠️ Auto-Heal Cluster", type="secondary"):
-        fetch_from_vm("heal", method="POST")
+# --- AI CONFIGURATION PANEL ---
+st.subheader("🧠 System AI Configuration & Calibration")
+with st.container(border=True):
+    col_c1, col_c2, col_c3 = st.columns(3)
+    
+    with col_c1:
+        st.markdown("**1️⃣ Manual Calibration**")
+        cal_val = st.number_input("Duration", value=30, min_value=1)
+        cal_unit = st.selectbox("Unit", ["Seconds", "Minutes", "Hours"], key="cal_unit")
+        if st.button("🚀 Force Calibrate Now"):
+            mult = 1 if cal_unit == "Seconds" else (60 if cal_unit == "Minutes" else 3600)
+            fetch_from_vm("update-config", method="POST", payload={"force_calibrate": True, "calibration_duration": cal_val * mult})
+            st.toast("System Calibration Initiated!")
+
+    with col_c2:
+        st.markdown("**2️⃣ Auto-Recalibration**")
+        auto_cal = st.checkbox("Enable Auto-Recalibration", value=False)
+        auto_val = st.number_input("Interval", value=1, min_value=1)
+        auto_unit = st.selectbox("Unit", ["Hours", "Minutes", "Seconds"], key="auto_unit")
+        
+    with col_c3:
+        st.markdown("**3️⃣ Adaptive Threshold Strictness**")
+        strength_val = st.number_input("Multiplier (1.0 = Default)", value=1.0, min_value=0.1, step=0.1)
+        st.markdown("")
+        st.markdown("")
+        if st.button("💾 Apply AI Settings", type="primary"):
+            amult = 3600 if auto_unit == "Hours" else (60 if auto_unit == "Minutes" else 1)
+            fetch_from_vm("update-config", method="POST", payload={
+                "auto_recalibrate": auto_cal,
+                "auto_interval": auto_val * amult,
+                "strength_multiplier": float(strength_val)
+            })
+            st.toast("AI Configuration Updated Successfully!")
+
+st.divider()
+
+col_atk, col_def = st.columns(2)
+with col_atk:
+    st.subheader("🚀 Attack Orchestration")
+    with st.container(border=True):
+        a_c1, a_c2, a_c3 = st.columns(3)
+        if a_c1.button("🌊 SYN Flood (VM)"):
+            try: requests.post(f"http://{attacker_vm_ip}:5000/launch", json={"vector": "syn_flood", "target_ip": krrad_vm_ip, "target_port": "32028"}, timeout=5)
+            except: st.error("VM Offline")
+        
+        if a_c2.button("🌩️ Terraform Botnet"):
+            fetch_from_vm("launch-terraform", method="POST")
+            st.toast("Terraform Botnet Launching...")
+            
+        if a_c3.button("🛑 STOP ALL", type="secondary"):
+            try: requests.post(f"http://{attacker_vm_ip}:5000/stop", timeout=5)
+            except: pass
+            fetch_from_vm("stop-terraform", method="POST")
+            st.toast("Stopping Attacks...")
+
+with col_def:
+    st.subheader("🛡️ Defense Operations")
+    with st.container(border=True):
+        d_c1, d_c2, d_c3 = st.columns(3)
+        if d_c1.button("🔍 Toggle Health Table"):
+            st.session_state.show_health = not st.session_state.show_health
+        if d_c2.button("🛠️ Auto-Heal Cluster"):
+            fetch_from_vm("heal", method="POST")
+        if d_c3.button("🚨 Reset Entire System"):
+            fetch_from_vm("reset", method="POST")
 
 if st.session_state.get('show_health', False):
     h_data = fetch_from_vm("health")
@@ -56,27 +113,6 @@ if st.session_state.get('show_health', False):
             return 'color: #00FF00' if 'Ready' in val else 'color: #FF0000'
         st.dataframe(df.style.map(color_health, subset=['Health']), use_container_width=True, hide_index=True)
 
-st.divider()
-col_atk, col_def = st.columns(2)
-with col_atk:
-    st.subheader("🚀 Attack Orchestration")
-    with st.container(border=True):
-        a_c1, a_c2 = st.columns(2)
-        if a_c1.button("🌊 Targeted SYN (Block)"):
-            try: requests.post(f"http://{attacker_vm_ip}:5000/launch", json={"vector": "syn_flood", "target_ip": krrad_vm_ip, "target_port": "32028"}, timeout=5)
-            except: st.error("Attacker VM Offline")
-        if a_c2.button("🛑 STOP ATTACK", type="secondary"):
-            try: requests.post(f"http://{attacker_vm_ip}:5000/stop", timeout=5)
-            except: pass
-
-with col_def:
-    st.subheader("🛡️ Defense Operations")
-    with st.container(border=True):
-        if st.button("🚨 EMERGENCY RESET", type="primary"):
-            fetch_from_vm("reset", method="POST")
-        if st.button("🧠 Restart AI"):
-            fetch_from_vm("restart-ai", method="POST")
-
 if krrad_vm_ip:
     st.divider()
     st.subheader("📜 Mitigation History")
@@ -84,11 +120,11 @@ if krrad_vm_ip:
     if hist:
         st.dataframe(pd.DataFrame(hist), use_container_width=True, hide_index=True)
         
-        with st.expander("📝 Submit Feedback"):
+        with st.expander("📝 Submit Feedback (RLHF)"):
             f_c1, f_c2, f_c3 = st.columns([1, 2, 1])
             tid = f_c1.number_input("Action ID", min_value=1, step=1)
-            fval = f_c2.selectbox("Decision", ["Good Decision", "False Positive"])
-            if f_c3.button("Submit"):
+            fval = f_c2.selectbox("Decision", ["Good Decision", "False Positive", "Too Strict", "Too Lenient"])
+            if f_c3.button("Submit Feedback"):
                 fetch_from_vm("submit-feedback", method="POST", payload={"id": tid, "value": fval})
                 st.rerun()
 

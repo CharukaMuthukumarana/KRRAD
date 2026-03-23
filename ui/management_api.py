@@ -1,5 +1,6 @@
 from flask import Flask, jsonify, request
 import subprocess
+import requests
 import re
 import datetime
 
@@ -33,19 +34,43 @@ def get_history():
             act_m = re.search(r"Action: (\w+)", line)
             pps_m = re.search(r"PPS: (\d+)", line)
             tgt_m = re.search(r"Target: ([\d\.]+)", line)
+            rep_m = re.search(r"Replicas: (\d+)", line)
+            
             mitigation_history.append({
                 "id": len(mitigation_history) + 1,
                 "timestamp": datetime.datetime.now().strftime("%H:%M:%S"),
                 "action": act_m.group(1) if act_m else "Unknown",
                 "pps": pps_m.group(1) if pps_m else "0",
-                "target": tgt_m.group(1) if tgt_m else "Distributed",
+                "target/replicas": tgt_m.group(1) if tgt_m else (f"Scale to {rep_m.group(1)}" if rep_m else "System"),
                 "feedback": "Awaiting Review"
             })
     return jsonify(mitigation_history[::-1])
 
+# --- NEW AI CONFIGURATION ENDPOINT ---
+@app.route('/update-config', methods=['POST'])
+def update_config():
+    data = request.json
+    try:
+        r = requests.post("http://localhost:8081", json=data, timeout=2)
+        return jsonify(r.json())
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+# --- NEW TERRAFORM ENDPOINTS ---
+@app.route('/launch-terraform', methods=['POST'])
+def launch_terraform():
+    cmd = "cd /home/charuka2002buss/botnet && terraform init && terraform apply -auto-approve"
+    subprocess.Popen(cmd, shell=True)
+    return jsonify({"status": "Terraform botnet launching"})
+
+@app.route('/stop-terraform', methods=['POST'])
+def stop_terraform():
+    cmd = "cd /home/charuka2002buss/botnet && terraform destroy -auto-approve"
+    subprocess.Popen(cmd, shell=True)
+    return jsonify({"status": "Terraform botnet stopping"})
+
 @app.route('/simulate-swarm', methods=['POST'])
 def simulate_swarm():
-    # Use the VM's main IP and the NodePort to ensure the sensor sees it
     target_ip = subprocess.getoutput("hostname -I | awk '{print $1}'")
     cmd = f"docker run --rm -d --name swarm_flood --net=host debian:bookworm-slim sh -c 'apt-get update && apt-get install -y hping3 && hping3 -S --flood --rand-source -p 32028 {target_ip}'"
     subprocess.Popen(cmd, shell=True)
