@@ -38,41 +38,6 @@ def fetch_from_vm(endpoint, method="GET", payload=None):
     except: return None
 
 st.title("🛡️ KRRAD AI Defense Hub")
-
-# --- AI CONFIGURATION PANEL ---
-st.subheader("🧠 System AI Configuration & Calibration")
-with st.container(border=True):
-    col_c1, col_c2, col_c3 = st.columns(3)
-    
-    with col_c1:
-        st.markdown("**1️⃣ Manual Calibration**")
-        cal_val = st.number_input("Duration", value=30, min_value=1)
-        cal_unit = st.selectbox("Unit", ["Seconds", "Minutes", "Hours"], key="cal_unit")
-        if st.button("🚀 Force Calibrate Now"):
-            mult = 1 if cal_unit == "Seconds" else (60 if cal_unit == "Minutes" else 3600)
-            fetch_from_vm("update-config", method="POST", payload={"force_calibrate": True, "calibration_duration": cal_val * mult})
-            st.toast("System Calibration Initiated!")
-
-    with col_c2:
-        st.markdown("**2️⃣ Auto-Recalibration**")
-        auto_cal = st.checkbox("Enable Auto-Recalibration", value=False)
-        auto_val = st.number_input("Interval", value=1, min_value=1)
-        auto_unit = st.selectbox("Unit", ["Hours", "Minutes", "Seconds"], key="auto_unit")
-        
-    with col_c3:
-        st.markdown("**3️⃣ Adaptive Threshold Strictness**")
-        strength_val = st.number_input("Multiplier (1.0 = Default)", value=1.0, min_value=0.1, step=0.1)
-        st.markdown("")
-        st.markdown("")
-        if st.button("💾 Apply AI Settings", type="primary"):
-            amult = 3600 if auto_unit == "Hours" else (60 if auto_unit == "Minutes" else 1)
-            fetch_from_vm("update-config", method="POST", payload={
-                "auto_recalibrate": auto_cal,
-                "auto_interval": auto_val * amult,
-                "strength_multiplier": float(strength_val)
-            })
-            st.toast("AI Configuration Updated Successfully!")
-
 st.divider()
 
 col_atk, col_def = st.columns(2)
@@ -102,8 +67,9 @@ with col_def:
             st.session_state.show_health = not st.session_state.show_health
         if d_c2.button("🛠️ Auto-Heal Cluster"):
             fetch_from_vm("heal", method="POST")
-        if d_c3.button("🚨 Reset Entire System"):
-            fetch_from_vm("reset", method="POST")
+        if d_c3.button("🧠 Restart AI (Recalibrate)"):
+            fetch_from_vm("restart-ai", method="POST")
+            st.toast("AI Restarted. Commencing 30s Calibration...")
 
 if st.session_state.get('show_health', False):
     h_data = fetch_from_vm("health")

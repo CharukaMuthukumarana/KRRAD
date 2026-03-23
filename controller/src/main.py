@@ -8,14 +8,11 @@ import datetime
 from prometheus_client import start_http_server, Gauge
 import warnings
 import os
-import threading
-import json
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from kubernetes import client, config
 
 warnings.filterwarnings("ignore")
 
-# --- PROMETHEUS METRICS ---
+# Prometheus Metrics
 PPS_GAUGE = Gauge('krrad_traffic_pps', 'Current Packets Per Second')
 BPS_GAUGE = Gauge('krrad_traffic_bps', 'Current Bytes Per Second')
 ATTACK_GAUGE = Gauge('krrad_attack_status', 'System Threat Status')
@@ -30,48 +27,6 @@ NAMESPACE = "default"
 COOLDOWN_SECONDS = 10
 IS_SCALED_UP = False
 
-# --- DYNAMIC CONFIGURATION STATE ---
-CONFIG = {
-    "force_calibrate": False,
-    "calibration_duration": 30,       # seconds
-    "auto_recalibrate": False,        # toggle feature
-    "auto_interval": 3600,            # seconds (default 1 hour)
-    "strength_multiplier": 1.0        # threshold strictness (1.0 = normal, 2.0 = relaxed/higher limit)
-}
-
-# --- INTERNAL API SERVER FOR DASHBOARD CONTROL ---
-class ConfigHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header('Content-type', 'application/json')
-        self.end_headers()
-        self.wfile.write(json.dumps(CONFIG).encode())
-
-    def do_POST(self):
-        global CONFIG
-        try:
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length)
-            new_config = json.loads(post_data)
-            CONFIG.update(new_config)
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.end_headers()
-            self.wfile.write(json.dumps({"status": "success", "config": CONFIG}).encode())
-        except Exception as e:
-            self.send_response(400)
-            self.end_headers()
-
-    def log_message(self, format, *args):
-        pass # Suppress HTTP logs to keep terminal clean
-
-def run_api_server():
-    server = HTTPServer(('0.0.0.0', 8081), ConfigHandler)
-    server.serve_forever()
-
-threading.Thread(target=run_api_server, daemon=True).start()
-
-# --- ML MODELS ---
 class KRRAD_DNN(nn.Module):
     def __init__(self, input_dim):
         super(KRRAD_DNN, self).__init__()
@@ -108,14 +63,12 @@ try:
     rl_agent.eval()
 except Exception as e: exit(1)
 
-# --- STATE VARIABLES ---
 last_action_time = datetime.datetime.now()
 observation_start_time = None
 current_threat_ip = None
 
-is_calibrating = True
-calibration_start_time = time.monotonic()
-last_calibration_time = time.monotonic()
+# Self-Learning Variables
+CALIBRATION_TICKS_REQUIRED = 30
 current_calibration_tick = 0
 learned_max_pps = 0.0
 dynamic_baseline_pps = 0.0
@@ -185,8 +138,7 @@ def execute_mitigation(action, pps, target_ip=None, target_replicas=2, is_critic
     return "UNKNOWN"
 
 start_http_server(8000)
-print("🚀 KRRAD AI Controller Booting. Advanced Dynamic Defense Enabled.")
-
+print("🚀 KRRAD AI Controller Booting. Initiating Calibration Phase...")
 while True:
     try:
         r = requests.get(f"{SENSOR_URL}/metrics", timeout=2)
@@ -200,27 +152,6 @@ last_time = time.monotonic()
 
 while True:
     time.sleep(1)
-    
-    # --- CHECK CONFIGURATION TRIGGERS ---
-    if CONFIG["force_calibrate"]:
-        print("\n🔄 DASHBOARD COMMAND: Forcing Manual AI Recalibration...")
-        is_calibrating = True
-        calibration_start_time = time.monotonic()
-        current_calibration_tick = 0
-        learned_max_pps = 0.0
-        dynamic_baseline_pps = 0.0
-        CONFIG["force_calibrate"] = False
-        
-    if not is_calibrating and CONFIG["auto_recalibrate"]:
-        if (time.monotonic() - last_calibration_time) > CONFIG["auto_interval"]:
-            print(f"\n🔄 AUTO-TRIGGER: Time interval reached ({CONFIG['auto_interval']}s). Recalibrating AI...")
-            is_calibrating = True
-            calibration_start_time = time.monotonic()
-            current_calibration_tick = 0
-            learned_max_pps = 0.0
-            dynamic_baseline_pps = 0.0
-
-    # --- FETCH METRICS ---
     try:
         data = requests.get(f"{SENSOR_URL}/metrics", timeout=3).json()
         potential_attacker_ip = data.get("top_source_ip")
@@ -238,32 +169,20 @@ while True:
     BPS_GAUGE.set(bps)
     BASELINE_GAUGE.set(dynamic_baseline_pps)
     
-    # --- 1. SYSTEM CALIBRATION LOGIC ---
-    if is_calibrating:
-        cal_duration = CONFIG["calibration_duration"]
-        elapsed_cal = time.monotonic() - calibration_start_time
-        
+    # 1. SYSTEM CALIBRATION WARM-UP
+    if current_calibration_tick < CALIBRATION_TICKS_REQUIRED:
         dynamic_baseline_pps = (alpha * pps) + ((1 - alpha) * dynamic_baseline_pps) if current_calibration_tick > 0 else float(pps)
         learned_max_pps = max(learned_max_pps, float(pps))
         current_calibration_tick += 1
-        
-        if elapsed_cal < cal_duration:
-            print(f"⚙️ CALIBRATING [{int(elapsed_cal)}/{cal_duration}s] | PPS: {pps} | Max Spike: {int(learned_max_pps)}")
-            execute_mitigation(0, pps)
-            continue
-        else:
-            is_calibrating = False
-            last_calibration_time = time.monotonic()
-            print(f"✅ CALIBRATION COMPLETE. System locked with Max Normal Spike: {int(learned_max_pps)}")
+        print(f"⚙️ CALIBRATING [{current_calibration_tick}/{CALIBRATION_TICKS_REQUIRED}] | PPS: {pps} | Max Normal Spike: {int(learned_max_pps)}")
+        execute_mitigation(0, pps)
+        continue
 
-    # --- 2. ADAPTIVE THRESHOLDS (WITH STRENGTH MULTIPLIER) ---
-    strength = float(CONFIG["strength_multiplier"])
+    # 2. ADAPTIVE THRESHOLDS
+    anomaly_threshold = max(learned_max_pps * 1.5, dynamic_baseline_pps * 3.0)
+    anomaly_threshold = max(100.0, anomaly_threshold) 
     
-    # The anomaly barrier scales mathematically with the user's dashboard multiplier
-    anomaly_threshold = max(learned_max_pps * 1.5 * strength, dynamic_baseline_pps * 3.0 * strength)
-    anomaly_threshold = max(100.0 * strength, anomaly_threshold) 
     critical_threshold = anomaly_threshold * 20.0
-    
     is_critical_surge = pps >= critical_threshold
 
     if pps < anomaly_threshold:
@@ -274,12 +193,13 @@ while True:
         execute_mitigation(0, pps)
         continue
 
-    # --- 3. ML EVALUATION ---
+    # 3. FEATURE ENGINEERING
     avg_packet_size = 0 if pps == 0 else bps / pps
     features_raw = [[pps, bps, pps, avg_packet_size]]
     features_scaled = scaler.transform(features_raw)
     features_tensor = torch.tensor(features_scaled, dtype=torch.float32)
     
+    # 4. ENSEMBLE EVALUATION
     with torch.no_grad(): dnn_conf = dnn_model(features_tensor).item()
     rf_pred = rf_model.predict(features_raw)[0]
     iso_pred = iso_model.predict(features_raw)[0]
@@ -287,11 +207,14 @@ while True:
     CONFIDENCE_GAUGE.set(dnn_conf)
     
     final_status = 0
-    if dnn_conf > 0.8: final_status = 1
-    elif dnn_conf > 0.6 and rf_pred == 1 and iso_pred == -1: final_status = 1
+    if dnn_conf > 0.8:
+        final_status = 1
+    elif dnn_conf > 0.6 and rf_pred == 1 and iso_pred == -1:
+        final_status = 1
 
     ATTACK_GAUGE.set(final_status)
 
+    # 5. RL AGENT MITIGATION
     state = torch.tensor([[min(1.0, pps / 100000), min(1.0, bps / 10000000), min(1.0, pps / 50000), 1.0 if final_status > 0 else 0.0]], dtype=torch.float32)
     with torch.no_grad(): action = torch.argmax(rl_agent(state)).item()
 

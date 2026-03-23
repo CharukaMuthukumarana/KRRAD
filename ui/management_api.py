@@ -46,17 +46,7 @@ def get_history():
             })
     return jsonify(mitigation_history[::-1])
 
-# --- NEW AI CONFIGURATION ENDPOINT ---
-@app.route('/update-config', methods=['POST'])
-def update_config():
-    data = request.json
-    try:
-        r = requests.post("http://localhost:8081", json=data, timeout=2)
-        return jsonify(r.json())
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)})
-
-# --- NEW TERRAFORM ENDPOINTS ---
+# --- TERRAFORM ENDPOINTS ---
 @app.route('/launch-terraform', methods=['POST'])
 def launch_terraform():
     cmd = "cd /home/charuka2002buss/botnet && terraform init && terraform apply -auto-approve"
