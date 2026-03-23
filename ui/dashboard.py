@@ -62,14 +62,29 @@ with col_atk:
 with col_def:
     st.subheader("🛡️ Defense Operations")
     with st.container(border=True):
+        # Top Row: Standard Operations
         d_c1, d_c2, d_c3 = st.columns(3)
-        if d_c1.button("🔍 Toggle Health Table"):
+        if d_c1.button("🔍 Toggle Health"):
             st.session_state.show_health = not st.session_state.show_health
-        if d_c2.button("🛠️ Auto-Heal Cluster"):
+        if d_c2.button("🛠️ Auto-Heal"):
             fetch_from_vm("heal", method="POST")
-        if d_c3.button("🧠 Restart AI (Recalibrate)"):
+            st.toast("Auto-Heal Initiated...")
+        if d_c3.button("🧠 Restart AI"):
             fetch_from_vm("restart-ai", method="POST")
             st.toast("AI Restarted. Commencing 30s Calibration...")
+            
+        # Bottom Row: Emergency Resets
+        d_c4, d_c5 = st.columns(2)
+        if d_c4.button("🚨 Reset System & Unblock IPs", type="primary"):
+            fetch_from_vm("reset", method="POST")
+            st.toast("System Reset. All eBPF blocks flushed.")
+            time.sleep(1)
+            st.rerun()
+        if d_c5.button("🗑️ Clear History"):
+            fetch_from_vm("clear-history", method="POST")
+            st.toast("Mitigation History Cleared.")
+            time.sleep(1)
+            st.rerun()
 
 if st.session_state.get('show_health', False):
     h_data = fetch_from_vm("health")
