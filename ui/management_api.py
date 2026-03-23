@@ -1,6 +1,5 @@
 from flask import Flask, jsonify, request
 import subprocess
-import requests
 import re
 import datetime
 
@@ -46,7 +45,6 @@ def get_history():
             })
     return jsonify(mitigation_history[::-1])
 
-# --- TERRAFORM ENDPOINTS ---
 @app.route('/launch-terraform', methods=['POST'])
 def launch_terraform():
     cmd = "cd /home/charuka2002buss/botnet && terraform init && terraform apply -auto-approve"
@@ -58,18 +56,6 @@ def stop_terraform():
     cmd = "cd /home/charuka2002buss/botnet && terraform destroy -auto-approve"
     subprocess.Popen(cmd, shell=True)
     return jsonify({"status": "Terraform botnet stopping"})
-
-@app.route('/simulate-swarm', methods=['POST'])
-def simulate_swarm():
-    target_ip = subprocess.getoutput("hostname -I | awk '{print $1}'")
-    cmd = f"docker run --rm -d --name swarm_flood --net=host debian:bookworm-slim sh -c 'apt-get update && apt-get install -y hping3 && hping3 -S --flood --rand-source -p 32028 {target_ip}'"
-    subprocess.Popen(cmd, shell=True)
-    return jsonify({"status": "Swarm simulation started"})
-
-@app.route('/stop-swarm', methods=['POST'])
-def stop_swarm():
-    subprocess.getoutput("docker rm -f swarm_flood")
-    return jsonify({"status": "stopped"})
 
 @app.route('/clear-history', methods=['POST'])
 def clear_history():

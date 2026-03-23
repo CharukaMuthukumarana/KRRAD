@@ -38,8 +38,29 @@ def fetch_from_vm(endpoint, method="GET", payload=None):
     except: return None
 
 st.title("🛡️ KRRAD AI Defense Hub")
+
+# --- INFRASTRUCTURE SECTION ---
+st.header("📋 Infrastructure")
+col_h1, col_h2 = st.columns(2)
+with col_h1:
+    if st.button("🔍 Toggle Health Table"):
+        st.session_state.show_health = not st.session_state.show_health
+with col_h2:
+    if st.button("🛠️ Auto-Heal Cluster", type="secondary"):
+        fetch_from_vm("heal", method="POST")
+        st.toast("Auto-Heal Initiated...")
+
+if st.session_state.get('show_health', False):
+    h_data = fetch_from_vm("health")
+    if h_data and "pods" in h_data:
+        df = pd.DataFrame(h_data["pods"])
+        def color_health(val):
+            return 'color: #00FF00' if 'Ready' in val else 'color: #FF0000'
+        st.dataframe(df.style.map(color_health, subset=['Health']), use_container_width=True, hide_index=True)
+
 st.divider()
 
+# --- ORCHESTRATION & DEFENSE SECTION ---
 col_atk, col_def = st.columns(2)
 with col_atk:
     st.subheader("🚀 Attack Orchestration")
@@ -62,37 +83,21 @@ with col_atk:
 with col_def:
     st.subheader("🛡️ Defense Operations")
     with st.container(border=True):
-        # Top Row: Standard Operations
-        d_c1, d_c2, d_c3 = st.columns(3)
-        if d_c1.button("🔍 Toggle Health"):
-            st.session_state.show_health = not st.session_state.show_health
-        if d_c2.button("🛠️ Auto-Heal"):
-            fetch_from_vm("heal", method="POST")
-            st.toast("Auto-Heal Initiated...")
-        if d_c3.button("🧠 Restart AI"):
+        if st.button("🧠 Restart AI (Recalibrate)"):
             fetch_from_vm("restart-ai", method="POST")
             st.toast("AI Restarted. Commencing 30s Calibration...")
             
-        # Bottom Row: Emergency Resets
-        d_c4, d_c5 = st.columns(2)
-        if d_c4.button("🚨 Reset System & Unblock IPs", type="primary"):
+        d_c1, d_c2 = st.columns(2)
+        if d_c1.button("🚨 Reset System & Unblock IPs", type="primary"):
             fetch_from_vm("reset", method="POST")
             st.toast("System Reset. All eBPF blocks flushed.")
             time.sleep(1)
             st.rerun()
-        if d_c5.button("🗑️ Clear History"):
+        if d_c2.button("🗑️ Clear History"):
             fetch_from_vm("clear-history", method="POST")
             st.toast("Mitigation History Cleared.")
             time.sleep(1)
             st.rerun()
-
-if st.session_state.get('show_health', False):
-    h_data = fetch_from_vm("health")
-    if h_data and "pods" in h_data:
-        df = pd.DataFrame(h_data["pods"])
-        def color_health(val):
-            return 'color: #00FF00' if 'Ready' in val else 'color: #FF0000'
-        st.dataframe(df.style.map(color_health, subset=['Health']), use_container_width=True, hide_index=True)
 
 if krrad_vm_ip:
     st.divider()
