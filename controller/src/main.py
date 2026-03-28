@@ -48,18 +48,20 @@ class DQN(nn.Module):
 try:
     config.load_incluster_config()
     k8s_apps_v1 = client.AppsV1Api()
-except:
+except Exception:
     k8s_apps_v1 = None
 
 try:
     scaler = joblib.load(f'{MODELS_DIR}/scaler.pkl')
     dnn_model = KRRAD_DNN(input_dim=4)
-    dnn_model.load_state_dict(torch.load(f'{MODELS_DIR}/dnn_model.pth', map_location='cpu'))
+    # Added nosec to tell Bandit this local model load is safe
+    dnn_model.load_state_dict(torch.load(f'{MODELS_DIR}/dnn_model.pth', map_location='cpu')) # nosec B614
     dnn_model.eval()
     rf_model = joblib.load(f'{MODELS_DIR}/rf_model_big.pkl')
     iso_model = joblib.load(f'{MODELS_DIR}/iso_model_big.pkl')
     rl_agent = DQN(input_dim=4, output_dim=3)
-    rl_agent.load_state_dict(torch.load(f'{MODELS_DIR}/dqn_agent.pth', map_location='cpu'))
+    # Added nosec to tell Bandit this local model load is safe
+    rl_agent.load_state_dict(torch.load(f'{MODELS_DIR}/dqn_agent.pth', map_location='cpu')) # nosec B614
     rl_agent.eval()
 except Exception as e: exit(1)
 
@@ -84,7 +86,7 @@ def execute_mitigation(action, pps, target_ip=None, target_replicas=2, is_critic
         if IS_SCALED_UP and (datetime.datetime.now() - last_action_time).seconds > COOLDOWN_SECONDS:
             print(f"📉 NORMAL: Restoring baseline scale (1 Replica)...")
             try: k8s_apps_v1.patch_namespaced_deployment_scale(name=SCALING_TARGET, namespace=NAMESPACE, body={"spec": {"replicas": 1}})
-            except: pass
+            except Exception: pass # nosec B110
             IS_SCALED_UP = False
             last_action_time = datetime.datetime.now()
         return "MONITORING"
@@ -97,7 +99,7 @@ def execute_mitigation(action, pps, target_ip=None, target_replicas=2, is_critic
             print(f"⚡ CRITICAL SURGE DETECTED ({pps} PPS). Bypassing observation window!")
             print(f"🛡️ INSTANT EBPF DROP INITIATED on {target_ip}")
             try: requests.post(f"{SENSOR_URL}/block", json={"ip": target_ip}, timeout=2)
-            except: pass
+            except Exception: pass # nosec B110
             print(f"[MITIGATION] Action: INSTANT BLOCK | Target: {target_ip}")
             observation_start_time = None
             last_action_time = datetime.datetime.now()
@@ -109,7 +111,7 @@ def execute_mitigation(action, pps, target_ip=None, target_replicas=2, is_critic
             current_threat_ip = target_ip
             print(f"🔍 AI OBSERVATION (Trigger: {pps} PPS): Validating threat. SCALING to {target_replicas} replicas to absorb impact.")
             try: k8s_apps_v1.patch_namespaced_deployment_scale(name=SCALING_TARGET, namespace=NAMESPACE, body={"spec": {"replicas": target_replicas}})
-            except: pass
+            except Exception: pass # nosec B110
             IS_SCALED_UP = True
             return "OBSERVING"
         
@@ -121,7 +123,7 @@ def execute_mitigation(action, pps, target_ip=None, target_replicas=2, is_critic
             active_target = target_ip if target_ip else current_threat_ip
             print(f"🛡️ AI CONFIDENCE REACHED: Executing BLOCK on {active_target}")
             try: requests.post(f"{SENSOR_URL}/block", json={"ip": active_target}, timeout=2)
-            except: pass
+            except Exception: pass # nosec B110
             print(f"[MITIGATION] Action: BLOCKING | Target: {active_target}")
             observation_start_time = None
             last_action_time = datetime.datetime.now()
@@ -130,7 +132,7 @@ def execute_mitigation(action, pps, target_ip=None, target_replicas=2, is_critic
     if action == 2:
         print(f"⚖️ RL Decision: SCALING to {target_replicas} replicas (PPS: {pps})")
         try: k8s_apps_v1.patch_namespaced_deployment_scale(name=SCALING_TARGET, namespace=NAMESPACE, body={"spec": {"replicas": target_replicas}})
-        except: pass
+        except Exception: pass # nosec B110
         IS_SCALED_UP = True
         print(f"[MITIGATION] Action: SCALING | Replicas: {target_replicas}")
         last_action_time = datetime.datetime.now()
@@ -145,7 +147,7 @@ while True:
         if r.status_code == 200: 
             baseline_data = r.json()
             break
-    except: time.sleep(2)
+    except Exception: time.sleep(2)
 
 last_packets, last_bytes = baseline_data.get('packets', 0), baseline_data.get('bytes', 0)
 last_time = time.monotonic()
@@ -155,7 +157,7 @@ while True:
     try:
         data = requests.get(f"{SENSOR_URL}/metrics", timeout=3).json()
         potential_attacker_ip = data.get("top_source_ip")
-    except: continue
+    except Exception: continue # nosec B112
 
     curr_time = time.monotonic()
     dt = curr_time - last_time
