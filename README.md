@@ -1,4 +1,5 @@
-# KRRAD: Kubernetes-native Resilience and Response Against DDoS
+### KRRAD: Kubernetes-Native AI DDoS Defense Framework
+KRRAD is an autonomous, self-learning cybersecurity framework designed to defend Kubernetes clusters against volumetric DDoS attacks. It utilizes an Ensemble Machine Learning pipeline (DNN, Random Forest, Isolation Forest) for threat detection, a Deep Reinforcement Learning (DQN) agent for proportional Horizontal Pod Autoscaling (HPA), and eBPF for instant, kernel-level packet dropping.
 
 GitHub Link: https://github.com/CharukaMuthukumarana/KRRAD
 
@@ -6,125 +7,72 @@ Dataset: https://www.kaggle.com/datasets/dhoogla/cicddos2019/data
 
 **KRRAD** is an autonomous security framework designed to detect and mitigate Distributed Denial of Service (DDoS) attacks in Kubernetes environments. It utilizes **eBPF (Extended Berkeley Packet Filter)** for high-performance telemetry and a hybrid **Machine Learning / Reinforcement Learning** engine for intelligent decision-making.
 
----
+Docker installed and configured.
 
-## Quick Start (Run the System)
-Use these commands to start and stop the system for demonstrations.
+Python 3.10+
 
-### 1. Start the System
-If you have already built the images, follow these steps to wake up the cluster and run KRRAD.
+Terraform (for distributed attack simulations).
 
-**Step 1: Start Infrastructure**
-# Start the Virtual Machine
-colima start --cpu 4 --memory 8
-
-# Start the Kubernetes Cluster
-minikube start
-
-**Step 2: deploy/Wake Up KRRAD If the pods are not running automatically, apply the configurations:**
-# Deploy Sensor (The Eyes)
-kubectl apply -f monitor/daemonset.yaml
-kubectl apply -f monitor/service.yaml
-# Deploy Controller (The Brain)
-kubectl apply -f controller/deployment.yaml
-
-**Step 3: Monitor Logs Watch the brain making decisions in real-time:**
-    kubectl logs -f -l app=krrad-controller
-# (Wait until you see "KRRAD Controller Started" before attacking)
+## Installation & Setup
+1. Enable Kubernetes Metrics Server
+KRRAD's Reinforcement Learning agent requires real-time cluster metrics to scale pods proportionally.
 
 
-### 2. Stop the System
+wget https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+sed -i 's/- args:/- args:\n        - --kubelet-insecure-tls/' components.yaml
+kubectl apply -f components.yaml
+Wait ~60 seconds for metrics to become available (kubectl top pods -A).
 
-# Stop the cluster
-minikube stop
-# Stop the VM
-colima stop
+2. Deploy KRRAD Core Services
 
+# Build and deploy the AI Controller and eBPF Sensor nodes:
 
-
-### How to Simulate an Attack
-
-# To demonstrate the system's reaction, you will simulate a high-velocity SYN Flood attack.
-* Open a NEW Terminal window.
-* Log into the hosting VM:
-    colima ssh
-
-# Launch the Attack: (Replace <IP_ADDRESS> with your Minikube IP if different)
-* udo hping3 -S -p 5000 --flood <IP_ADDRESS>
-
-# Observe Results: Switch back to your Controller Logs terminal. You should see the status change from Secure to:
-!!! ATTACK DETECTED (Conf: 0.85) !!!
->> RL Decision: BLOCK IP
-
-# Stop Attack: Press Ctrl + C in the Colima terminal.
+cd KRRAD/controller
+sudo docker build -t krrad-controller:latest .
+kubectl rollout restart deployment krrad-controller
 
 
+3. Launch the AI Defense Hub (Dashboard)
+The UI requires the Flask Management API to bridge backend execution with the Streamlit frontend.
 
-### First-Time Installation & Build
-* Only run this section if you are setting up the project from scratch or if you have changed the code.
+# Start the Management API (Background Process):
 
-Prerequisites
-* OS: macOS (Apple Silicon M1/M2/M3)
-* Virtualization: Colima
-* Orchestration: Minikube
-* Tools: kubectl, docker, python3, hping3
+pkill -f management_api.py
+python3 ~/KRRAD/ui/management_api.py &
 
-## Environment Setup
-# Start Colima with sufficient resources
-colima start --cpu 4 --memory 8
-# Start Minikube with BPF mounting enabled
-minikube start --driver=docker --container-runtime=docker \
-  --mount \
-  --mount-string="/sys/fs/bpf:/sys/fs/bpf" \
-  --mount-string="/lib/modules:/lib/modules"
+# Start the Streamlit Dashboard:
 
-## Build Docker Images
-* We must build the images inside Minikube's Docker environment so the cluster can see them.
-# 1. Point shell to Minikube's Docker daemon
-eval $(minikube -p minikube docker-env)
-# 2. Build eBPF Sensor
-docker build -t krrad-sensor:latest -f monitor/Dockerfile monitor/
-# 3. Build AI Controller
-docker build -t krrad-controller:latest -f controller/Dockerfile controller/
+streamlit run ~/KRRAD/ui/dashboard.py
+The dashboard will be accessible via port 8501 (e.g., http://<YOUR_VM_IP>:8501).
 
 
+## Running Attack Simulations
 
+# Option A: Via the KRRAD Dashboard (Recommended)
+Open the KRRAD AI Defense Hub.
 
+In the Attack Orchestration panel, click 🌩️ Terraform Botnet.
 
-### System Architecture
-1. The Sensor (eBPF/XDP)
-* Location: Kernel Space (Network Interface Card driver level).
-* Function: Inspects every packet before the OS handles it.
-* Telemetry: Extracts PPS (Packets Per Second) and Bandwidth stats without performance overhead.
-* Action: Can drop malicious packets instantly (XDP_DROP).
- 
-2. The Controller (Python)
-* Function: Central "Brain" that aggregates data from the Sensor.
-* Detection (Machine Learning):
-    * Model: Random Forest Classifier.
-    * Training: Trained on a balanced dataset of CICDDoS2019 + Synthetic Noise.
-    * Role: Determines if an attack is happening (Probability > 0.5).
-* Decision (Reinforcement Learning):
-    * Model: Deep Q-Network (DQN).
-    * Role: Determines the best response (Block Source, Scale Pods, or Monitor) based on reward maximization.
+Watch the Live Stream metrics to observe the system auto-calibrate, detect the anomaly, calculate proportional scale targets, and execute the eBPF block.
 
+# Option B: Via the Terminal (Manual)
+To manually launch a 3-node, rate-limited (~6,000 PPS) distributed SYN flood:
 
+cd ~/botnet
+terraform init
+terraform apply -auto-approve
 
-### Troubleshooting
-1. "Minikube command not found" during build
-Fix: You likely opened a new terminal. Run eval $(minikube -p minikube docker-env) again before building.
+# To stop the attack and destroy the attacker VMs:
 
-2. Attack is running but logs show 0 PPS
-Fix: The attacker must target the Node IP (192.168.49.2), not the Service DNS. Use kubectl get pods -o wide to check IPs if unsure.
+terraform destroy -auto-approve
 
-3. "X does not have valid feature names" warning
-Fix: This is a benign warning from Scikit-Learn. It does not affect functionality and can be ignored. 
+# System Reset & Maintenance
+If you need to unblock IPs, flush the eBPF maps, and reset the mitigation history:
 
-4. "Cannot connect to the Docker daemon"
-Fix: eval $(minikube -p minikube docker-env)
+Click 🚨 Reset System & Unblock IPs in the Dashboard.
 
+Or manually execute: python3 ~/KRRAD/demo/reset.py
 
+To force the AI to recalibrate its normal traffic baseline:
 
-### Get Grafana admin user password
-* kubectl --namespace default get secrets monitoring-grafana -o jsonpath="{.data.admin-password}" | base64 -d ; echo
-
+Click 🧠 Restart AI (Recalibrate) in the Dashboard.

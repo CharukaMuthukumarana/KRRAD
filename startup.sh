@@ -1,52 +1,58 @@
 #!/bin/bash
-set -e # Exit if any command fails
+set -e 
 
 echo "========================================"
-echo "   🚀 KRRAD System Launch Sequence      "
+echo "    🚀 Launching KRRAD Production Hub"
 echo "========================================"
 
-# 1. Smart Minikube Check
-echo "[1/5] Checking Minikube Status..."
+# Unlock Kernel Networking
+sudo modprobe br_netfilter
+sudo sysctl -w net.ipv4.ip_forward=1
+sudo sysctl -w net.bridge.bridge-nf-call-iptables=1
+sudo iptables -P FORWARD ACCEPT
+
+# Ensure Minikube is Active
 if minikube status --format='{{.Host}}' | grep -q "Running"; then
-    echo "      ✅ Minikube is already running."
-    echo "      🔄 Refreshing connection (fixing TLS)..."
-    minikube update-context > /dev/null
+    echo "Minikube is running."
 else
-    echo "      🔻 Minikube is stopped. Starting (may download image)..."
-    minikube start
+    echo "Starting Minikube..."
+    sudo minikube start --driver=none
+    sudo chown -R $USER $HOME/.kube $HOME/.minikube
+    sed -i "s|/root|/home/$USER|g" $HOME/.kube/config
 fi
 
-# 2. Configure Docker Environment
-echo "[2/5] Configuring Docker Env..."
-eval $(minikube -p minikube docker-env)
+sudo iptables -t nat -A POSTROUTING -o $(ip route show default | awk '/default/ {print $5}') -j MASQUERADE || true
+kubectl rollout restart daemonset kube-proxy -n kube-system
 
-# 3. Build Docker Images
-echo "[3/5] Building Docker Images..."
-echo "      Building Sensor (eBPF)..."
-docker build -t krrad-sensor:latest -f monitor/Dockerfile monitor/ > /dev/null
-echo "      Building Controller (AI Brain)..."
-docker build -t krrad-controller:latest -f controller/Dockerfile controller/ > /dev/null
-
-# 4. Deploy to Kubernetes
-echo "[4/5] Deploying Resources..."
-
-# Deploy Sensor
-kubectl apply -f monitor/service.yaml
-kubectl apply -f monitor/daemonset.yaml
-
-# Deploy Controller
-kubectl apply -f controller/deployment.yaml
-
-# Deploy Monitoring Stack (if it exists)
-if [ -f "controller/monitoring.yaml" ]; then
-    kubectl apply -f controller/monitoring.yaml
+# Deploy KRRAD Core Resources
+echo "[3/5] Deploying Core Resources..."
+kubectl apply -f /home/charuka2002buss/KRRAD/monitor/service.yaml
+kubectl apply -f /home/charuka2002buss/KRRAD/monitor/daemonset.yaml
+kubectl apply -f /home/charuka2002buss/KRRAD/controller/deployment.yaml
+if [ -f "/home/charuka2002buss/KRRAD/controller/monitoring.yaml" ]; then
+    kubectl apply -f /home/charuka2002buss/KRRAD/controller/monitoring.yaml
 fi
 
-# 5. Grant Permissions
-echo "[5/5] Configuring Permissions..."
-kubectl create clusterrolebinding krrad-admin-default --clusterrole=cluster-admin --serviceaccount=default:default --dry-run=client -o yaml | kubectl apply -f -
+# Stability & Service Automation
+echo "Waiting for stability (Sleep 40)..."
+sleep 40
+
+echo "🔄 Syncing Grafana Dashboards..."
+kubectl delete pod -l app.kubernetes.io/name=grafana --ignore-not-found
+kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=grafana --timeout=120s
+
+echo "🚀 Launching Background APIs & Services..."
+
+# Port Forward for Grafana (Port 3000)
+pkill -f "port-forward" || true
+nohup kubectl port-forward deployment/monitoring-grafana --address 0.0.0.0 3000:3000 > /home/charuka2002buss/KRRAD/ui/grafana_forward.log 2>&1 &
+
+# Launch Management API (Port 8000) - FOR CLOUD UI
+pkill -f "management_api.py" || true
+nohup python3 /home/charuka2002buss/KRRAD/ui/management_api.py > /home/charuka2002buss/KRRAD/ui/api.log 2>&1 &
 
 echo "========================================"
-echo "✅ KRRAD System is LIVE!"
-echo "   Monitor Logs: kubectl logs -f -l app=krrad-controller"
+echo "✅ SYSTEM FULLY ACTIVE"
+echo "Management API: http://$(curl -s ifconfig.me):8000"
+echo "Grafana Dashboard: http://$(curl -s ifconfig.me):3000"
 echo "========================================"

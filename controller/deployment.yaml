@@ -17,11 +17,15 @@ spec:
       serviceAccountName: krrad-controller-sa
       containers:
       - name: controller
-        image: charuka2002/krrad-controller:4.1-rc  # Ensure this matches your latest build
+        image: krrad-controller:latest
         imagePullPolicy: IfNotPresent
         env:
+        - name: HOST_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
         - name: SENSOR_URL
-          value: "http://krrad-sensor.kube-system.svc.cluster.local:5000"
+          value: "http://$(HOST_IP):5000"
         - name: PROMETHEUS_URL
           value: "http://prometheus-service.monitoring.svc.cluster.local:9090"
         ports:

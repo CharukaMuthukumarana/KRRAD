@@ -41,7 +41,6 @@ try:
 except:
     pass
 
-print("   - Waiting for Target...")
 try:
     subprocess.run("kubectl wait --for=condition=ready pod -l app=krrad-target --timeout=60s", 
                    shell=True, check=True, stdout=subprocess.DEVNULL)
