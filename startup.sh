@@ -5,27 +5,26 @@ echo "========================================"
 echo "    🚀 Launching KRRAD Production Hub"
 echo "========================================"
 
-# 1. Unlock Kernel Networking
+# Unlock Kernel Networking
 sudo modprobe br_netfilter
 sudo sysctl -w net.ipv4.ip_forward=1
 sudo sysctl -w net.bridge.bridge-nf-call-iptables=1
 sudo iptables -P FORWARD ACCEPT
 
-# 2. Ensure Minikube is Active
+# Ensure Minikube is Active
 if minikube status --format='{{.Host}}' | grep -q "Running"; then
-    echo "      ✅ Minikube is running."
+    echo "Minikube is running."
 else
-    echo "      🔻 Starting Minikube..."
+    echo "Starting Minikube..."
     sudo minikube start --driver=none
     sudo chown -R $USER $HOME/.kube $HOME/.minikube
     sed -i "s|/root|/home/$USER|g" $HOME/.kube/config
 fi
 
-# 3. Network Routing Fixes
 sudo iptables -t nat -A POSTROUTING -o $(ip route show default | awk '/default/ {print $5}') -j MASQUERADE || true
 kubectl rollout restart daemonset kube-proxy -n kube-system
 
-# 4. Deploy KRRAD Core Resources
+# Deploy KRRAD Core Resources
 echo "[3/5] Deploying Core Resources..."
 kubectl apply -f /home/charuka2002buss/KRRAD/monitor/service.yaml
 kubectl apply -f /home/charuka2002buss/KRRAD/monitor/daemonset.yaml
@@ -34,8 +33,8 @@ if [ -f "/home/charuka2002buss/KRRAD/controller/monitoring.yaml" ]; then
     kubectl apply -f /home/charuka2002buss/KRRAD/controller/monitoring.yaml
 fi
 
-# 5. Stability & Service Automation
-echo "⏳ Waiting for stability (Sleep 40)..."
+# Stability & Service Automation
+echo "Waiting for stability (Sleep 40)..."
 sleep 40
 
 echo "🔄 Syncing Grafana Dashboards..."
@@ -54,6 +53,6 @@ nohup python3 /home/charuka2002buss/KRRAD/ui/management_api.py > /home/charuka20
 
 echo "========================================"
 echo "✅ SYSTEM FULLY ACTIVE"
-echo "🔑 Management API: http://$(curl -s ifconfig.me):8000"
-echo "📊 Grafana Dashboard: http://$(curl -s ifconfig.me):3000"
+echo "Management API: http://$(curl -s ifconfig.me):8000"
+echo "Grafana Dashboard: http://$(curl -s ifconfig.me):3000"
 echo "========================================"

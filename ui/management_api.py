@@ -48,27 +48,25 @@ def get_history():
 @app.route('/launch-terraform', methods=['POST'])
 def launch_terraform():
     cmd = "cd /home/charuka2002buss/botnet && terraform init && terraform apply -auto-approve"
-    subprocess.Popen(cmd, shell=True) # nosec
+    subprocess.Popen(cmd, shell=True) 
     return jsonify({"status": "Terraform botnet launching"})
 
 @app.route('/stop-terraform', methods=['POST'])
 def stop_terraform():
     cmd = "cd /home/charuka2002buss/botnet && terraform destroy -auto-approve"
-    subprocess.Popen(cmd, shell=True) # nosec
+    subprocess.Popen(cmd, shell=True) 
     return jsonify({"status": "Terraform botnet stopping"})
 
 @app.route('/clear-history', methods=['POST'])
 def clear_history():
     global mitigation_history
     mitigation_history.clear()
-    # DO NOT clear seen_logs, otherwise it parses the old pod logs as new again!
     return jsonify({"status": "cleared"})
 
 @app.route('/reset', methods=['POST'])
 def reset():
     global mitigation_history
     mitigation_history.clear()
-    # DO NOT clear seen_logs here either!
     return jsonify({"output": subprocess.getoutput("python3 /home/charuka2002buss/KRRAD/demo/reset.py")})
 
 @app.route('/restart-ai', methods=['POST'])

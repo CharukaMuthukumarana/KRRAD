@@ -3,7 +3,6 @@ echo "🛡️ KRRAD Watchdog Started. Monitoring strict cluster health..."
 
 while true; do
     sleep 60
-    # Find crashed pods OR pods where ready containers don't match total (e.g., 1/2)
     UNHEALTHY=$(kubectl get pods -A | awk 'NR>1 {split($3,a,"/"); if ($4=="CrashLoopBackOff" || $4=="Error" || a[1]!=a[2]) print $2 " -n " $1}')
     
     if [ ! -z "$UNHEALTHY" ]; then

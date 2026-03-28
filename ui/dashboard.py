@@ -39,7 +39,7 @@ def fetch_from_vm(endpoint, method="GET", payload=None):
 
 st.title("🛡️ KRRAD AI Defense Hub")
 
-# --- INFRASTRUCTURE SECTION ---
+# INFRASTRUCTURE SECTION
 st.header("📋 Infrastructure")
 col_h1, col_h2 = st.columns(2)
 with col_h1:
@@ -60,7 +60,7 @@ if st.session_state.get('show_health', False):
 
 st.divider()
 
-# --- ORCHESTRATION & DEFENSE SECTION ---
+# ORCHESTRATION & DEFENSE SECTION
 col_atk, col_def = st.columns(2)
 with col_atk:
     st.subheader("🚀 Attack Orchestration")
@@ -115,7 +115,7 @@ if krrad_vm_ip:
                 st.rerun()
 
 st.divider()
-st.subheader("🧠 Live Stream")
+st.subheader("Live Stream")
 if st.checkbox("Enable Feed"):
     c_m, c_l = st.columns([1, 2])
     with c_m:
