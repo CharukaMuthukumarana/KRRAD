@@ -70,7 +70,7 @@ def unblock_ip():
     except: pass
     return jsonify({"status": "unblocked", "ip": ip})
 
-# --- NEW ROUTE: Silently clear the eBPF map without restarting the pod ---
+# Silently clear the eBPF map without restarting the pod
 @app.route('/unblock_all', methods=['POST'])
 def unblock_all():
     try:
