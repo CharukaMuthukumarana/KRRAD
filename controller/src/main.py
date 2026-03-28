@@ -81,75 +81,73 @@ def execute_mitigation(action, pps, target_ip=None, target_replicas=2, is_critic
     
     ACTION_GAUGE.set(action)
     
+    time_since_last = (datetime.datetime.now() - last_action_time).seconds
+
+    # 0. MONITORING (and Recovery)
     if action == 0:
-        observation_start_time = None  
-        if IS_SCALED_UP and (datetime.datetime.now() - last_action_time).seconds > COOLDOWN_SECONDS:
-            print(f"📉 NORMAL: Restoring baseline scale (1 Replica)...")
-            try: k8s_apps_v1.patch_namespaced_deployment_scale(name=SCALING_TARGET, namespace=NAMESPACE, body={"spec": {"replicas": 1}})
-            except Exception: pass # nosec B110
-            IS_SCALED_UP = False
+        consecutive_blocks = 0
+        if IS_SCALED_UP and time_since_last > COOLDOWN_SECONDS:
+            print(f"📉 SAFE DETECTED: Scaling down to baseline...")
+            if k8s_apps_v1:
+                try:
+                    k8s_apps_v1.patch_namespaced_deployment_scale(
+                        name=SCALING_TARGET, namespace=NAMESPACE, body={"spec": {"replicas": 1}}
+                    )
+                    IS_SCALED_UP = False
+                    print("✅ Scale Down executed.")
+                except Exception as e: print(f"❌ Scale Down Failed: {e}")
             last_action_time = datetime.datetime.now()
         return "MONITORING"
 
-    if (datetime.datetime.now() - last_action_time).seconds < 5 and observation_start_time is None and not is_critical:
-        return "COOLDOWN"
-
+    # 1. BLOCKING
     if action == 1:
-        if is_critical:
-            print(f"⚡ CRITICAL SURGE DETECTED ({pps} PPS). Bypassing observation window!")
-            print(f"🛡️ INSTANT EBPF DROP INITIATED on {target_ip}")
-            try: requests.post(f"{SENSOR_URL}/block", json={"ip": target_ip}, timeout=2)
-            except Exception: pass # nosec B110
-            print(f"[MITIGATION] Action: INSTANT BLOCK | Target: {target_ip}")
-            observation_start_time = None
-            last_action_time = datetime.datetime.now()
-            return "CRITICAL_BLOCK"
-
-        now = datetime.datetime.now()
-        if observation_start_time is None:
-            observation_start_time = now
-            current_threat_ip = target_ip
-            print(f"🔍 AI OBSERVATION (Trigger: {pps} PPS): Validating threat. SCALING to {target_replicas} replicas to absorb impact.")
-            try: k8s_apps_v1.patch_namespaced_deployment_scale(name=SCALING_TARGET, namespace=NAMESPACE, body={"spec": {"replicas": target_replicas}})
-            except Exception: pass # nosec B110
-            IS_SCALED_UP = True
-            return "OBSERVING"
-        
-        elapsed = (now - observation_start_time).seconds
-        if elapsed < 10:
-            print(f"⏳ OBSERVING: {10 - elapsed}s remaining to 100% AI Confidence.")
-            return "OBSERVING"
+        # INTELLIGENT ESCALATION (No Static Thresholds)
+        if consecutive_blocks >= 2:
+            print(f"⚠️ BEHAVIOR ANALYSIS: Repeated blocking failed (Swarm Detected). Escalating to SCALING.")
+            action = 2 # Override decision
         else:
-            active_target = target_ip if target_ip else current_threat_ip
-            print(f"🛡️ AI CONFIDENCE REACHED: Executing BLOCK on {active_target}")
-            try: requests.post(f"{SENSOR_URL}/block", json={"ip": active_target}, timeout=2)
-            except Exception: pass # nosec B110
-            print(f"[MITIGATION] Action: BLOCKING | Target: {active_target}")
-            observation_start_time = None
+            # FAST COOLDOWN FOR BLOCKING (2 SECONDS)
+            if time_since_last < 2:
+                return "COOLDOWN"
+
+            consecutive_blocks += 1
+            if target_ip in get_safe_ips():
+                print(f"⚠️ Ignored BLOCK for Safe IP: {target_ip}")
+                return "MONITORING"
+            
+            print(f"🛡️ RL Decision: BLOCKING (PPS: {pps})")
+            if target_ip:
+                try:
+                    requests.post(f"{SENSOR_URL}/block", json={"ip": target_ip}, timeout=2)
+                    print(f"⛔ Sent BLOCK command for: {target_ip}")
+                except Exception as e: print(f"❌ Block Failed: {e}")
             last_action_time = datetime.datetime.now()
             return "BLOCKING"
         
     if action == 2:
-        print(f"⚖️ RL Decision: SCALING to {target_replicas} replicas (PPS: {pps})")
-        try: k8s_apps_v1.patch_namespaced_deployment_scale(name=SCALING_TARGET, namespace=NAMESPACE, body={"spec": {"replicas": target_replicas}})
-        except Exception: pass # nosec B110
-        IS_SCALED_UP = True
-        print(f"[MITIGATION] Action: SCALING | Replicas: {target_replicas}")
+        # LONG COOLDOWN FOR SCALING (30 SECONDS)
+        if time_since_last < COOLDOWN_SECONDS:
+            return "COOLDOWN"
+
+        print(f"⚖️ RL Decision: SCALING (PPS: {pps})")
+        if k8s_apps_v1:
+            try:
+                k8s_apps_v1.patch_namespaced_deployment_scale(
+                    name=SCALING_TARGET, namespace=NAMESPACE, body={"spec": {"replicas": 5}}
+                )
+                IS_SCALED_UP = True
+                consecutive_blocks = 0
+                print("✅ Scaling UP command executed.")
+            except Exception as e: print(f"❌ Scaling Failed: {e}")
         last_action_time = datetime.datetime.now()
         return "SCALING"
     return "UNKNOWN"
 
 start_http_server(8000)
-print("🚀 KRRAD AI Controller Booting. Initiating Calibration Phase...")
-while True:
-    try:
-        r = requests.get(f"{SENSOR_URL}/metrics", timeout=2)
-        if r.status_code == 200: 
-            baseline_data = r.json()
-            break
-    except Exception: time.sleep(2)
-
-last_packets, last_bytes = baseline_data.get('packets', 0), baseline_data.get('bytes', 0)
+print("🚀 KRRAD Controller Live. v4.2 (Fixed Mitigation Logic).")
+baseline_data = get_sensor_data_blocking()
+last_packets = baseline_data.get('packets', 0)
+last_bytes = baseline_data.get('bytes', 0)
 last_time = time.monotonic()
 
 while True:

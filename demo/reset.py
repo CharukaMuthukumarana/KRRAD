@@ -1,22 +1,45 @@
 import subprocess
 import time
+import sys
+
+def run_command(cmd):
+    try:
+        # Run command and hide output unless there is an error
+        subprocess.check_call(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except subprocess.CalledProcessError:
+        pass # Ignore errors (like trying to scale down something that is already down)
 
 print("🔄 KRRAD: System Reset & Cleanup")
 print("--------------------------------------------------")
 
-print("📉 Scaling down 'krrad-target' to 1 replica...")
-subprocess.run("kubectl scale deployment krrad-target --replicas=1", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+# 1. STOP THE ATTACK (Crucial Step)
+print("🛑 Killing all Attackers...")
+# Try to scale down deployment if it exists
+run_command("kubectl scale deployment attacker --replicas=0")
+# Force delete any lingering attacker pods
+run_command("kubectl delete pods -l app=attacker --grace-period=0 --force")
 
-print("Flushing eBPF Blacklists...")
-pod_name = subprocess.getoutput("kubectl get pod -n kube-system -l app=krrad-sensor -o jsonpath='{.items[0].metadata.name}'")
+# 2. PAUSE THE BRAIN
+print("🧠 Pausing Controller (Preventing False Alarms)...")
+run_command("kubectl scale deployment krrad-controller --replicas=0")
 
-if "krrad-sensor" in pod_name:
-    unblock_cmd = f"""kubectl exec -n kube-system {pod_name} -- python3 -c "import urllib.request; req = urllib.request.Request('http://localhost:5000/unblock_all', method='POST'); res = urllib.request.urlopen(req); print(res.read().decode('utf-8'))" """
-    
-    result = subprocess.getoutput(unblock_cmd)
-    print(f"✅ Unblock API Response: {result}")
-else:
-    print("❌ Critical Error: Could not find krrad-sensor pod!")
+# 3. RESET INFRASTRUCTURE
+print("📉 Resetting Target to 1 Replica...")
+run_command("kubectl scale deployment krrad-target --replicas=1")
+
+print("🧹 Restarting Sensors (Clearing Blocklists)...")
+run_command("kubectl delete pod -n kube-system -l app=krrad-sensor")
+
+# 4. WAIT FOR SILENCE
+print("⏳ Waiting for system to stabilize...")
+time.sleep(5) # Give Kubernetes time to kill the attackers
+
+print("   - Waiting for Sensor...")
+try:
+    subprocess.run("kubectl wait --for=condition=ready pod -n kube-system -l app=krrad-sensor --timeout=60s", 
+                   shell=True, check=True, stdout=subprocess.DEVNULL)
+except:
+    pass
 
 try:
     subprocess.run("kubectl wait --for=condition=ready pod -l app=krrad-target --timeout=60s", 
@@ -24,5 +47,14 @@ try:
 except:
     pass
 
+# 5. WAKE UP THE BRAIN
+print("🧠 Waking up KRRAD Controller...")
+run_command("kubectl scale deployment krrad-controller --replicas=1")
+try:
+    subprocess.run("kubectl wait --for=condition=ready pod -l app=krrad-controller --timeout=30s", 
+                   shell=True, check=True, stdout=subprocess.DEVNULL)
+except:
+    pass
+
 print("--------------------------------------------------")
-print("✅ SYSTEM RESET COMPLETE.")
+print("✅ SYSTEM CLEAN. Baseline: 0 PPS.")

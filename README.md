@@ -1,8 +1,11 @@
 ### KRRAD: Kubernetes-Native AI DDoS Defense Framework
 KRRAD is an autonomous, self-learning cybersecurity framework designed to defend Kubernetes clusters against volumetric DDoS attacks. It utilizes an Ensemble Machine Learning pipeline (DNN, Random Forest, Isolation Forest) for threat detection, a Deep Reinforcement Learning (DQN) agent for proportional Horizontal Pod Autoscaling (HPA), and eBPF for instant, kernel-level packet dropping.
 
-## Prerequisites
-A running Kubernetes Cluster (Custom or Managed).
+GitHub Link: https://github.com/CharukaMuthukumarana/KRRAD
+
+Dataset: https://www.kaggle.com/datasets/dhoogla/cicddos2019/data
+
+**KRRAD** is an autonomous security framework designed to detect and mitigate Distributed Denial of Service (DDoS) attacks in Kubernetes environments. It utilizes **eBPF (Extended Berkeley Packet Filter)** for high-performance telemetry and a hybrid **Machine Learning / Reinforcement Learning** engine for intelligent decision-making.
 
 Docker installed and configured.
 
