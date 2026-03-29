@@ -2,7 +2,7 @@
 set -e 
 
 echo "========================================"
-echo "    🚀 Launching KRRAD Production Hub"
+echo "     Launching KRRAD Production Hub"
 echo "========================================"
 
 # Unlock Kernel Networking
@@ -37,11 +37,11 @@ fi
 echo "Waiting for stability (Sleep 40)..."
 sleep 40
 
-echo "🔄 Syncing Grafana Dashboards..."
+echo "Syncing Grafana Dashboards..."
 kubectl delete pod -l app.kubernetes.io/name=grafana --ignore-not-found
 kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=grafana --timeout=120s
 
-echo "🚀 Launching Background APIs & Services..."
+echo "Launching Background APIs & Services..."
 
 # Port Forward for Grafana (Port 3000)
 pkill -f "port-forward" || true
