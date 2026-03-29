@@ -123,7 +123,7 @@ def execute_mitigation(action, pps, target_ip=None, target_replicas=2, is_critic
             return "BLOCKING"
         
     if action == 2:
-        # LONG COOLDOWN FOR SCALING (30 SECONDS)
+        # LONG COOLDOWN FOR SCALING
         if time_since_last < COOLDOWN_SECONDS:
             return "COOLDOWN"
 
