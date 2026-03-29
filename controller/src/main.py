@@ -54,14 +54,12 @@ except Exception:
 try:
     scaler = joblib.load(f'{MODELS_DIR}/scaler.pkl')
     dnn_model = KRRAD_DNN(input_dim=4)
-    # Added nosec to tell Bandit this local model load is safe
-    dnn_model.load_state_dict(torch.load(f'{MODELS_DIR}/dnn_model.pth', map_location='cpu')) # nosec B614
+    dnn_model.load_state_dict(torch.load(f'{MODELS_DIR}/dnn_model.pth', map_location='cpu'))
     dnn_model.eval()
     rf_model = joblib.load(f'{MODELS_DIR}/rf_model_big.pkl')
     iso_model = joblib.load(f'{MODELS_DIR}/iso_model_big.pkl')
     rl_agent = DQN(input_dim=4, output_dim=3)
-    # Added nosec to tell Bandit this local model load is safe
-    rl_agent.load_state_dict(torch.load(f'{MODELS_DIR}/dqn_agent.pth', map_location='cpu')) # nosec B614
+    rl_agent.load_state_dict(torch.load(f'{MODELS_DIR}/dqn_agent.pth', map_location='cpu'))
     rl_agent.eval()
 except Exception as e: exit(1)
 
@@ -144,7 +142,7 @@ def execute_mitigation(action, pps, target_ip=None, target_replicas=2, is_critic
     return "UNKNOWN"
 
 start_http_server(8000)
-print("🚀 KRRAD Controller Live. v4.2 (Fixed Mitigation Logic).")
+print("KRRAD Controller is Live.")
 baseline_data = get_sensor_data_blocking()
 last_packets = baseline_data.get('packets', 0)
 last_bytes = baseline_data.get('bytes', 0)

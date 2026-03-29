@@ -19,12 +19,12 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 with st.sidebar:
-    st.header("⚙️ Cloud Configuration")
+    st.header("Cloud Configuration")
     krrad_vm_ip = st.text_input("🔑 KRRAD Backend IP", placeholder="35.xxx.xxx.xxx")
     attacker_vm_ip = st.text_input("📡 Attacker VM IP", placeholder="34.xxx.xxx.xxx")
     if krrad_vm_ip:
         st.success("Connected")
-        st.markdown(f"📊 [**Grafana**](http://{krrad_vm_ip}:3000)")
+        st.markdown(f"[**Grafana**](http://{krrad_vm_ip}:3000)")
     st.divider()
     if st.button("🔄 Reset UI"): st.rerun()
 
@@ -40,10 +40,10 @@ def fetch_from_vm(endpoint, method="GET", payload=None):
 st.title("🛡️ KRRAD AI Defense Hub")
 
 # INFRASTRUCTURE SECTION
-st.header("📋 Infrastructure")
+st.header("Infrastructure")
 col_h1, col_h2 = st.columns(2)
 with col_h1:
-    if st.button("🔍 Toggle Health Table"):
+    if st.button("Toggle System Health"):
         st.session_state.show_health = not st.session_state.show_health
 with col_h2:
     if st.button("🛠️ Auto-Heal Cluster", type="secondary"):
@@ -63,14 +63,14 @@ st.divider()
 # ORCHESTRATION & DEFENSE SECTION
 col_atk, col_def = st.columns(2)
 with col_atk:
-    st.subheader("🚀 Attack Orchestration")
+    st.subheader("Attack Orchestration")
     with st.container(border=True):
         a_c1, a_c2, a_c3 = st.columns(3)
         if a_c1.button("🌊 SYN Flood (VM)"):
             try: requests.post(f"http://{attacker_vm_ip}:5000/launch", json={"vector": "syn_flood", "target_ip": krrad_vm_ip, "target_port": "32028"}, timeout=5)
             except: st.error("VM Offline")
         
-        if a_c2.button("🌩️ Terraform Botnet"):
+        if a_c2.button("Terraform Botnet"):
             fetch_from_vm("launch-terraform", method="POST")
             st.toast("Terraform Botnet Launching...")
             
@@ -106,7 +106,7 @@ if krrad_vm_ip:
     if hist:
         st.dataframe(pd.DataFrame(hist), use_container_width=True, hide_index=True)
         
-        with st.expander("📝 Submit Feedback (RLHF)"):
+        with st.expander("Submit Feedback (RLHF)"):
             f_c1, f_c2, f_c3 = st.columns([1, 2, 1])
             tid = f_c1.number_input("Action ID", min_value=1, step=1)
             fval = f_c2.selectbox("Decision", ["Good Decision", "False Positive", "Too Strict", "Too Lenient"])
@@ -128,11 +128,11 @@ if st.checkbox("Enable Feed"):
         if h_data and "pods" in h_data:
             df_h = pd.DataFrame(h_data["pods"])
             cnt = len(df_h[df_h['Pod'].str.contains('krrad-target', na=False)])
-            p_rep.metric("🎯 Target Replicas", f"{cnt} / 5", delta="SCALED UP" if cnt > 1 else None)
+            p_rep.metric("Target Replicas", f"{cnt} / 5", delta="SCALED UP" if cnt > 1 else None)
         l_data = fetch_from_vm("logs")
         if l_data:
             logs = l_data.get('logs', '')
             pps = re.findall(r"PPS: (\d+)", logs)
-            p_pps.metric("📈 Traffic", f"{pps[-1] if pps else '0'} PPS")
+            p_pps.metric("Traffic", f"{pps[-1] if pps else '0'} PPS")
             p_log.code(logs, language="bash")
         time.sleep(2)
