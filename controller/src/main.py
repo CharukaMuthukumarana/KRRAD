@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 import datetime
+from datetime import timezone
 from prometheus_client import start_http_server, Gauge
 import warnings
 import os
@@ -26,6 +27,7 @@ SCALING_TARGET = "krrad-target"
 NAMESPACE = "default"
 COOLDOWN_SECONDS = 10
 IS_SCALED_UP = False
+consecutive_blocks = 0
 
 class KRRAD_DNN(nn.Module):
     def __init__(self, input_dim):
@@ -48,7 +50,7 @@ class DQN(nn.Module):
 try:
     config.load_incluster_config()
     k8s_apps_v1 = client.AppsV1Api()
-except Exception:
+except (config.ConfigException, Exception):  # nosec broad-except
     k8s_apps_v1 = None
 
 try:
@@ -61,9 +63,10 @@ try:
     rl_agent = DQN(input_dim=4, output_dim=3)
     rl_agent.load_state_dict(torch.load(f'{MODELS_DIR}/dqn_agent.pth', map_location='cpu'))
     rl_agent.eval()
-except Exception as e: exit(1)
+except (OSError, RuntimeError, Exception) as e:  # nosec broad-except
+    exit(1)
 
-last_action_time = datetime.datetime.now()
+last_action_time = datetime.datetime.now(timezone.utc)
 observation_start_time = None
 current_threat_ip = None
 
@@ -75,33 +78,33 @@ dynamic_baseline_pps = 0.0
 alpha = 0.1  
 
 def execute_mitigation(action, pps, target_ip=None, target_replicas=2, is_critical=False):
-    global last_action_time, IS_SCALED_UP, observation_start_time, current_threat_ip
+    global last_action_time, IS_SCALED_UP, observation_start_time, current_threat_ip, consecutive_blocks
     
     ACTION_GAUGE.set(action)
     
-    time_since_last = (datetime.datetime.now() - last_action_time).seconds
+    time_since_last = (datetime.datetime.now(timezone.utc) - last_action_time).seconds
 
     # 0. MONITORING (and Recovery)
     if action == 0:
         consecutive_blocks = 0
         if IS_SCALED_UP and time_since_last > COOLDOWN_SECONDS:
-            print(f"📉 SAFE DETECTED: Scaling down to baseline...")
+            print(f" SAFE DETECTED: Scaling down to baseline...")
             if k8s_apps_v1:
                 try:
                     k8s_apps_v1.patch_namespaced_deployment_scale(
                         name=SCALING_TARGET, namespace=NAMESPACE, body={"spec": {"replicas": 1}}
                     )
                     IS_SCALED_UP = False
-                    print("✅ Scale Down executed.")
-                except Exception as e: print(f"❌ Scale Down Failed: {e}")
-            last_action_time = datetime.datetime.now()
+                    print(" Scale Down executed.")
+                except (Exception,) as e: print(f" Scale Down Failed: {e}")  # nosec broad-except
+            last_action_time = datetime.datetime.now(timezone.utc)
         return "MONITORING"
 
     # 1. BLOCKING
     if action == 1:
         # INTELLIGENT ESCALATION (No Static Thresholds)
         if consecutive_blocks >= 2:
-            print(f"⚠️ BEHAVIOR ANALYSIS: Repeated blocking failed (Swarm Detected). Escalating to SCALING.")
+            print(f"️ BEHAVIOR ANALYSIS: Repeated blocking failed (Swarm Detected). Escalating to SCALING.")
             action = 2 # Override decision
         else:
             # FAST COOLDOWN FOR BLOCKING (2 SECONDS)
@@ -110,16 +113,16 @@ def execute_mitigation(action, pps, target_ip=None, target_replicas=2, is_critic
 
             consecutive_blocks += 1
             if target_ip in get_safe_ips():
-                print(f"⚠️ Ignored BLOCK for Safe IP: {target_ip}")
+                print(f"️ Ignored BLOCK for Safe IP: {target_ip}")
                 return "MONITORING"
             
-            print(f"🛡️ RL Decision: BLOCKING (PPS: {pps})")
+            print(f"️ RL Decision: BLOCKING (PPS: {pps})")
             if target_ip:
                 try:
                     requests.post(f"{SENSOR_URL}/block", json={"ip": target_ip}, timeout=2)
-                    print(f"⛔ Sent BLOCK command for: {target_ip}")
-                except Exception as e: print(f"❌ Block Failed: {e}")
-            last_action_time = datetime.datetime.now()
+                    print(f" Sent BLOCK command for: {target_ip}")
+                except (requests.exceptions.RequestException, Exception) as e: print(f" Block Failed: {e}")  # nosec broad-except
+            last_action_time = datetime.datetime.now(timezone.utc)
             return "BLOCKING"
         
     if action == 2:
@@ -127,7 +130,7 @@ def execute_mitigation(action, pps, target_ip=None, target_replicas=2, is_critic
         if time_since_last < COOLDOWN_SECONDS:
             return "COOLDOWN"
 
-        print(f"⚖️ RL Decision: SCALING (PPS: {pps})")
+        print(f"️ RL Decision: SCALING (PPS: {pps})")
         if k8s_apps_v1:
             try:
                 k8s_apps_v1.patch_namespaced_deployment_scale(
@@ -135,9 +138,9 @@ def execute_mitigation(action, pps, target_ip=None, target_replicas=2, is_critic
                 )
                 IS_SCALED_UP = True
                 consecutive_blocks = 0
-                print("✅ Scaling UP command executed.")
-            except Exception as e: print(f"❌ Scaling Failed: {e}")
-        last_action_time = datetime.datetime.now()
+                print(" Scaling UP command executed.")
+            except (Exception,) as e: print(f" Scaling Failed: {e}")  # nosec broad-except
+        last_action_time = datetime.datetime.now(timezone.utc)
         return "SCALING"
     return "UNKNOWN"
 
@@ -172,7 +175,7 @@ while True:
         dynamic_baseline_pps = (alpha * pps) + ((1 - alpha) * dynamic_baseline_pps) if current_calibration_tick > 0 else float(pps)
         learned_max_pps = max(learned_max_pps, float(pps))
         current_calibration_tick += 1
-        print(f"⚙️ CALIBRATING [{current_calibration_tick}/{CALIBRATION_TICKS_REQUIRED}] | PPS: {pps} | Max Normal Spike: {int(learned_max_pps)}")
+        print(f"️ CALIBRATING [{current_calibration_tick}/{CALIBRATION_TICKS_REQUIRED}] | PPS: {pps} | Max Normal Spike: {int(learned_max_pps)}")
         execute_mitigation(0, pps)
         continue
 
@@ -185,7 +188,7 @@ while True:
 
     if pps < anomaly_threshold:
         dynamic_baseline_pps = (alpha * pps) + ((1 - alpha) * dynamic_baseline_pps)
-        if pps > 10: print(f"✅ NORMAL (PPS: {pps} | Threshold: {int(anomaly_threshold)})")
+        if pps > 10: print(f" NORMAL (PPS: {pps} | Threshold: {int(anomaly_threshold)})")
         ATTACK_GAUGE.set(0)
         CONFIDENCE_GAUGE.set(0)
         execute_mitigation(0, pps)
@@ -198,7 +201,7 @@ while True:
     features_tensor = torch.tensor(features_scaled, dtype=torch.float32)
     
     # 4. ENSEMBLE EVALUATION
-    with torch.no_grad(): dnn_conf = dnn_model(features_tensor).item()
+    with torch.inference_mode(): dnn_conf = dnn_model(features_tensor).item()
     rf_pred = rf_model.predict(features_raw)[0]
     iso_pred = iso_model.predict(features_raw)[0]
     
@@ -214,10 +217,10 @@ while True:
 
     # 5. RL AGENT MITIGATION
     state = torch.tensor([[min(1.0, pps / 100000), min(1.0, bps / 10000000), min(1.0, pps / 50000), 1.0 if final_status > 0 else 0.0]], dtype=torch.float32)
-    with torch.no_grad(): action = torch.argmax(rl_agent(state)).item()
+    with torch.inference_mode(): action = torch.argmax(rl_agent(state)).item()
 
     calculated_replicas = min(5, max(2, int((pps / anomaly_threshold) + 1)))
 
     mitigation = execute_mitigation(action, pps, target_ip=potential_attacker_ip, target_replicas=calculated_replicas, is_critical=is_critical_surge)
     if mitigation != "OBSERVING":
-        print(f"🚨 ACTION TRIGGERED (PPS: {pps}) | Agent Code: {action} | Mitigation: {mitigation}")
+        print(f" ACTION TRIGGERED (PPS: {pps}) | Agent Code: {action} | Mitigation: {mitigation}")

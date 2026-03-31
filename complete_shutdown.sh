@@ -1,7 +1,7 @@
 #!/bin/bash
 
 echo "========================================"
-echo "   🛑 KRRAD System Shutdown Sequence    "
+echo "    KRRAD System Shutdown Sequence    "
 echo "========================================"
 
 # 1. Delete Resources
@@ -19,5 +19,5 @@ echo "[2/2] Stopping Minikube Cluster..."
 minikube stop
 
 echo "========================================"
-echo "✅ System Shutdown Complete."
+echo " System Shutdown Complete."
 echo "========================================"

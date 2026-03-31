@@ -51,7 +51,7 @@ The dashboard will be accessible via port 8501 (e.g., http://<YOUR_VM_IP>:8501).
 # Option A: Via the KRRAD Dashboard (Recommended)
 Open the KRRAD AI Defense Hub.
 
-In the Attack Orchestration panel, click 🌩️ Terraform Botnet.
+In the Attack Orchestration panel, click ️ Terraform Botnet.
 
 Watch the Live Stream metrics to observe the system auto-calibrate, detect the anomaly, calculate proportional scale targets, and execute the eBPF block.
 
@@ -69,10 +69,10 @@ terraform destroy -auto-approve
 # System Reset & Maintenance
 If you need to unblock IPs, flush the eBPF maps, and reset the mitigation history:
 
-Click 🚨 Reset System & Unblock IPs in the Dashboard.
+Click  Reset System & Unblock IPs in the Dashboard.
 
 Or manually execute: python3 ~/KRRAD/demo/reset.py
 
 To force the AI to recalibrate its normal traffic baseline:
 
-Click 🧠 Restart AI (Recalibrate) in the Dashboard.
+Click  Restart AI (Recalibrate) in the Dashboard.

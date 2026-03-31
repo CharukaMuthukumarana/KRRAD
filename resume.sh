@@ -2,7 +2,7 @@
 set -e
 
 echo "========================================"
-echo "   🚀 Initializing KRRAD System (Final) "
+echo "    Initializing KRRAD System (Final) "
 echo "========================================"
 
 sed -i 's|image: charuka2002/krrad-sensor:v.*|image: charuka2002/krrad-sensor:v1.3|' monitor/daemonset.yaml
@@ -47,7 +47,7 @@ NEW_SENSOR_IP=$(kubectl get svc -n kube-system krrad-sensor -o jsonpath='{.spec.
 echo "      ℹ️  Sensor IP found: $NEW_SENSOR_IP"
 
 if [ -z "$NEW_SENSOR_IP" ]; then
-    echo "      ⚠️  Warning: IP not ready. Waiting 5s..."
+    echo "      ️  Warning: IP not ready. Waiting 5s..."
     sleep 5
     NEW_SENSOR_IP=$(kubectl get svc -n kube-system krrad-sensor -o jsonpath='{.spec.clusterIP}')
 fi
@@ -62,8 +62,8 @@ kubectl wait --for=condition=ready pod -l app=krrad-sensor -n kube-system --time
 kubectl wait --for=condition=ready pod -l app=krrad-controller --timeout=120s
 
 echo "========================================"
-echo "✅ SYSTEM IS LIVE! 🚀"
+echo " SYSTEM IS LIVE! "
 echo "========================================"
-echo "👉 NEXT STEP: Run this command for the dashboard:"
+echo " NEXT STEP: Run this command for the dashboard:"
 echo "   kubectl port-forward --address 0.0.0.0 svc/krrad-controller-metrics 8000:8000"
 echo "To Get Logs: kubectl logs -l app=krrad-controller -f"

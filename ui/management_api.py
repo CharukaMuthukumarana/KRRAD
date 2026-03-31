@@ -15,7 +15,7 @@ def health():
         parts = line.split()
         if len(parts) >= 6:
             ns, name, ready, status = parts[0], parts[1], parts[2], parts[3]
-            health_stat = f"✅ Ready" if status == "Running" and ready.split('/')[0] == ready.split('/')[1] else f"❌ {status}"
+            health_stat = f" Ready" if status == "Running" and ready.split('/')[0] == ready.split('/')[1] else f" {status}"
             pods.append({"Namespace": ns, "Pod": name, "Ready": ready, "Status": status, "Health": health_stat})
     return jsonify({"pods": pods, "raw": output})
 

@@ -52,7 +52,7 @@ pkill -f "management_api.py" || true
 nohup python3 /home/charuka2002buss/KRRAD/ui/management_api.py > /home/charuka2002buss/KRRAD/ui/api.log 2>&1 &
 
 echo "========================================"
-echo "✅ SYSTEM FULLY ACTIVE"
+echo " SYSTEM FULLY ACTIVE"
 echo "Management API: http://$(curl -s ifconfig.me):8000"
 echo "Grafana Dashboard: http://$(curl -s ifconfig.me):3000"
 echo "========================================"
