@@ -77,6 +77,19 @@ learned_max_pps = 0.0
 dynamic_baseline_pps = 0.0
 alpha = 0.1  
 
+def get_safe_ips():
+    return ["localhost"]
+
+def get_sensor_data_blocking():
+    print(" Waiting for eBPF sensor metrics...")
+    while True:
+        try:
+            r = requests.get(f"{SENSOR_URL}/metrics", timeout=2)
+            if r.status_code == 200: 
+                return r.json()
+        except Exception: 
+            time.sleep(2)
+
 def execute_mitigation(action, pps, target_ip=None, target_replicas=2, is_critical=False):
     global last_action_time, IS_SCALED_UP, observation_start_time, current_threat_ip, consecutive_blocks
     
