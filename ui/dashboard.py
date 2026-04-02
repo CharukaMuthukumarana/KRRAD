@@ -10,6 +10,7 @@ st.set_page_config(
     page_icon="assets/favicon.png",
     layout="wide",
     initial_sidebar_state="expanded",
+    # Sidebar is always visible — collapse button hidden via CSS
 )
 
 # Global CSS and theme styles
@@ -161,6 +162,9 @@ hr { border-color: #1e2a3a !important; margin: 1.5rem 0 !important; }
 #MainMenu { display: none !important; }
 header { display: none !important; }
 footer { display: none !important; }
+
+[data-testid="collapsedControl"] { display: none !important; }
+[data-testid="stSidebarCollapseButton"] { display: none !important; }
 
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: #0b0f19; }
