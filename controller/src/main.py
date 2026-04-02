@@ -27,7 +27,7 @@ MODELS_DIR = "/app/models"
 SCALING_TARGET = "krrad-target"
 NAMESPACE = "default"
 COOLDOWN_SECONDS = 10
-MAX_REPLICAS = 10
+MAX_REPLICAS = 5
 IS_SCALED_UP = False
 consecutive_blocks = 0
 
@@ -120,15 +120,14 @@ def calculate_queueing_cpu(pps, k8s_apps_v1, learned_pod_capacity):
         return min(1.0, pps / learned_pod_capacity)
 
 
-def execute_mitigation(action, pps, target_ip=None, target_replicas_delta=2, is_critical=False):
+def execute_mitigation(action, pps, target_ip=None, target_replicas_delta=2, is_critical=False, is_safe=False):
     global last_action_time, IS_SCALED_UP, observation_start_time, current_threat_ip, consecutive_blocks
 
     ACTION_GAUGE.set(action)
     now = datetime.datetime.now(timezone.utc)
     time_since_last = (now - last_action_time).seconds
 
-    # Monitoring
-    if action == 0:
+    if is_safe:
         consecutive_blocks = 0
         observation_start_time = None
         if IS_SCALED_UP and time_since_last > COOLDOWN_SECONDS:
@@ -144,8 +143,13 @@ def execute_mitigation(action, pps, target_ip=None, target_replicas_delta=2, is_
             last_action_time = now
         return "MONITORING"
 
-    # Blocking
-    if action == 1:
+    if observation_start_time is not None:
+        elapsed = (now - observation_start_time).seconds
+        if elapsed >= 10:
+            action = 1  
+
+    # 1. BLOCKING
+    if action == 1 or is_critical:
         if target_ip in get_safe_ips():
             return "MONITORING"
 
@@ -157,16 +161,28 @@ def execute_mitigation(action, pps, target_ip=None, target_replicas_delta=2, is_
                 try:
                     requests.post(f"{SENSOR_URL}/block", json={"ip": active_target}, timeout=2)
                 except (requests.exceptions.RequestException, Exception) as e:  # nosec broad-except
-                    print(f"Block Failed: {e}")
+                    pass
             observation_start_time = None
             last_action_time = now
             return "INSTANT BLOCKING"
 
-        # Start observation window on first trigger
+        # Start observation window on first trigger AND proactively scale up
         if observation_start_time is None:
             observation_start_time = now
             current_threat_ip = target_ip
-            print(f"AI OBSERVATION (Trigger: {pps} PPS): Validating threat. Preparing mitigation...", flush=True)
+            print(f"AI OBSERVATION (Trigger: {pps} PPS): Validating threat. Proactively SCALING to absorb impact...", flush=True)
+            if k8s_apps_v1:
+                try:
+                    deployment = k8s_apps_v1.read_namespaced_deployment(name=SCALING_TARGET, namespace=NAMESPACE)
+                    current_replicas = deployment.spec.replicas or 1
+                    new_replicas = min(MAX_REPLICAS, current_replicas + target_replicas_delta)
+                    
+                    k8s_apps_v1.patch_namespaced_deployment_scale(
+                        name=SCALING_TARGET, namespace=NAMESPACE, body={"spec": {"replicas": new_replicas}}
+                    )
+                    IS_SCALED_UP = True
+                except (Exception,) as e:  # nosec broad-except
+                    pass
             return "OBSERVING"
 
         elapsed = (now - observation_start_time).seconds
@@ -179,12 +195,12 @@ def execute_mitigation(action, pps, target_ip=None, target_replicas_delta=2, is_
                 try:
                     requests.post(f"{SENSOR_URL}/block", json={"ip": active_target}, timeout=2)
                 except (requests.exceptions.RequestException, Exception) as e:  # nosec broad-except
-                    print(f"Block Failed: {e}")
+                    pass
             observation_start_time = None
             last_action_time = now
             return "BLOCKING"
 
-    # Scaling
+    # 2. SCALING
     if action == 2:
         if time_since_last < COOLDOWN_SECONDS:
             return "COOLDOWN"
@@ -199,11 +215,11 @@ def execute_mitigation(action, pps, target_ip=None, target_replicas_delta=2, is_
                 )
                 IS_SCALED_UP = True
             except (Exception,) as e:  # nosec broad-except
-                print(f"Scaling Failed: {e}")
+                pass
         last_action_time = now
         return "SCALING"
 
-    return "UNKNOWN"
+    return "MONITORING"
 
 
 # Start Prometheus metrics server and wait for sensor
@@ -243,7 +259,7 @@ while True:
         learned_max_bps = max(learned_max_bps, float(bps))
         current_calibration_tick += 1
         print(f"CALIBRATING [{current_calibration_tick}/{CALIBRATION_TICKS_REQUIRED}] | PPS: {pps}", flush=True)
-        execute_mitigation(0, pps)
+        execute_mitigation(0, pps, is_safe=True)
         continue
 
     # Adaptive thresholds based on learned baseline
@@ -258,13 +274,14 @@ while True:
             print(f"NORMAL (PPS: {pps} | Threshold: {int(anomaly_threshold)})", flush=True)
         ATTACK_GAUGE.set(0)
         CONFIDENCE_GAUGE.set(0)
-        execute_mitigation(0, pps)
+        # Notify the mitigation engine that traffic is strictly safe
+        execute_mitigation(0, pps, is_safe=True)
         continue
 
     # Feature engineering for ML models
     avg_packet_size = 0 if pps == 0 else bps / pps
     features_raw = [[pps, bps, ip_entropy, avg_packet_size]]
-    features_scaled = scaler.transform(features_raw) # CRITICAL FIX: Scale data before inference
+    features_scaled = scaler.transform(features_raw)
     features_tensor = torch.tensor(features_scaled, dtype=torch.float32)
 
     # Ensemble evaluation - DNN + Random Forest + Isolation Forest
@@ -302,9 +319,9 @@ while True:
 
     calculated_delta = min(3, max(1, int((pps / anomaly_threshold))))
 
-    mitigation = execute_mitigation(action, pps, target_ip=potential_attacker_ip, target_replicas_delta=calculated_delta, is_critical=is_critical_surge)
+    mitigation = execute_mitigation(action, pps, target_ip=potential_attacker_ip, target_replicas_delta=calculated_delta, is_critical=is_critical_surge, is_safe=False)
     
-    if mitigation not in ("OBSERVING", "COOLDOWN"):
+    if mitigation not in ("OBSERVING", "COOLDOWN", "MONITORING"):
         current_replicas = 1
         try:
              current_replicas = k8s_apps_v1.read_namespaced_deployment(name=SCALING_TARGET, namespace=NAMESPACE).spec.replicas
