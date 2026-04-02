@@ -27,14 +27,14 @@ int xdp_prog(struct xdp_md *ctx) {
     struct iphdr *ip = data + sizeof(*eth);
     if ((void *)ip + sizeof(*ip) > data_end) return XDP_PASS;
 
-    // Check Blacklist (Existing Logic)
+    // Check Blacklist
     u32 src_ip = ip->saddr;
     u8 *blocked = blacklist.lookup(&src_ip);
     if (blocked) {
         return XDP_DROP;
     }
 
-    // Update Protocol Metrics (Existing Logic)
+    // Update Protocol Metrics
     u32 protocol = ip->protocol;
     u64 packet_len = (u64)(data_end - data);
     struct metrics_t zero = {0, 0};

@@ -3,6 +3,7 @@ from flask import Flask, jsonify, request
 import sys
 import os
 import socket, struct
+import math
 
 app = Flask(__name__)
 
@@ -22,6 +23,23 @@ except Exception as e:
 def ip_to_int(ip_str):
     return struct.unpack("!I", socket.inet_aton(ip_str))[0]
 
+def calculate_shannon_entropy(ip_counts):
+    """Calculates the Shannon Entropy of the source IP distribution."""
+    if not ip_counts:
+        return 0.0
+    
+    total_packets = sum(ip_counts.values())
+    if total_packets == 0:
+        return 0.0
+        
+    entropy = 0.0
+    for count in ip_counts.values():
+        probability = count / total_packets
+        if probability > 0:
+            entropy -= probability * math.log2(probability)
+            
+    return entropy
+
 @app.route('/metrics', methods=['GET'])
 def get_metrics():
     total_packets = total_bytes = 0
@@ -34,15 +52,29 @@ def get_metrics():
 
     max_packets = 0
     top_ip_str = None
+    ip_counts = {}
+
+    # Extract all IPs and calculate the top attacker
     for k, v in b["ip_tracker"].items():
+        ip_str = socket.inet_ntoa(struct.pack("<I", k.value))
+        ip_counts[ip_str] = v.value
+        
         if v.value > max_packets:
             max_packets = v.value
-            top_ip_str = socket.inet_ntoa(struct.pack("<I", k.value))
+            top_ip_str = ip_str
+
+    ip_entropy = calculate_shannon_entropy(ip_counts)
 
     try: b["ip_tracker"].clear()
     except: pass
 
-    return jsonify({"packets": total_packets, "bytes": total_bytes, "details": details, "top_source_ip": top_ip_str})
+    return jsonify({
+        "packets": total_packets, 
+        "bytes": total_bytes, 
+        "details": details, 
+        "top_source_ip": top_ip_str,
+        "ip_entropy": ip_entropy
+    })
 
 @app.route('/block', methods=['POST'])
 def block_ip():

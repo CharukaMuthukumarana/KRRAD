@@ -1,7 +1,7 @@
 #!/bin/bash
 
 echo "========================================"
-echo "   🛑 Stopping KRRAD Application Only   "
+echo "    Stopping KRRAD Application Only   "
 echo "========================================"
 
 echo "[1/3] Removing Controller..."
@@ -17,7 +17,7 @@ if [ -f "controller/monitoring.yaml" ]; then
 fi
 
 echo "========================================"
-echo "✅ Application Stopped."
+echo " Application Stopped."
 echo "   Minikube is still active. "
 echo "   Run ./startup.sh to restart INSTANTLY."
 echo "========================================"
