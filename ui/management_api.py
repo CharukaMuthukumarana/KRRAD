@@ -103,7 +103,7 @@ def feedback():
 
 @app.route('/launch-local-attack', methods=['POST'])
 def launch_local_attack():
-    cmd = "sudo hping3 -S -p 32028 --flood $(minikube ip)"
+    cmd = "sudo hping3 -a 10.0.0.99 -S -p 32028 --flood 127.0.0.1"
     subprocess.Popen(cmd, shell=True) # nosec
     return jsonify({"status": "Local attack launched"})
 

@@ -47,7 +47,7 @@
                 "2": {
                   "color": "dark-yellow",
                   "index": 2,
-                  "text": "SUSPICIOUS"
+                  "text": "SCALING"
                 }
               },
               "type": "value"
@@ -57,12 +57,16 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": 0
+                "color": "semi-dark-green",
+                "value": null
               },
               {
-                "color": "red",
-                "value": 80
+                "color": "dark-red",
+                "value": 1
+              },
+              {
+                "color": "dark-yellow",
+                "value": 2
               }
             ]
           }
@@ -78,7 +82,7 @@
       "id": 1,
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "percentChangeColorMode": "standard",
@@ -101,7 +105,7 @@
             "uid": "prometheus"
           },
           "editorMode": "builder",
-          "expr": "krrad_attack_status",
+          "expr": "krrad_mitigation_action",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
@@ -160,7 +164,7 @@
             "steps": [
               {
                 "color": "green",
-                "value": 0
+                "value": null
               },
               {
                 "color": "red",
@@ -258,7 +262,7 @@
             "steps": [
               {
                 "color": "green",
-                "value": 0
+                "value": null
               },
               {
                 "color": "red",
@@ -357,4 +361,3 @@
   "uid": "adq9vwp2",
   "version": 1
 }
-

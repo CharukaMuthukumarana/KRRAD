@@ -22,7 +22,7 @@ spec:
           privileged: true
         env:
         - name: INTERFACE
-          value: "bridge"
+          value: "ens4, bridge"
         - name: XDP_MODE
           value: "skb"
         command:
@@ -30,20 +30,20 @@ spec:
         - -c
         - |
           set -e
-          echo "🔧 Manual Setup: Linking Kernel Headers..."
+          echo " Manual Setup: Linking Kernel Headers..."
           CURRENT_KERNEL=$(uname -r)
           INSTALLED_HEADERS=$(find /usr/src -maxdepth 1 -name "linux-headers-$CURRENT_KERNEL" -type d | head -n 1)
           if [ -z "$INSTALLED_HEADERS" ]; then
              INSTALLED_HEADERS=$(find /usr/src -maxdepth 1 -name "linux-headers-*" -type d | head -n 1)
           fi
           if [ -z "$INSTALLED_HEADERS" ]; then
-             echo "❌ CRITICAL: No linux-headers found in /usr/src!"
+             echo " CRITICAL: No linux-headers found in /usr/src!"
              exit 1
           fi
           mkdir -p /lib/modules/$CURRENT_KERNEL
           rm -f /lib/modules/$CURRENT_KERNEL/build
           ln -s $INSTALLED_HEADERS /lib/modules/$CURRENT_KERNEL/build
-          echo "🚀 Starting KRRAD Sensor..."
+          echo " Starting KRRAD Sensor..."
           python3 src/loader.py
         volumeMounts:
         - name: sys-fs-bpf
