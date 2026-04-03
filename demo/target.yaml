@@ -24,6 +24,7 @@ metadata:
   name: krrad-target-svc
 spec:
   type: NodePort
+  externalTrafficPolicy: Local
   selector:
     app: krrad-target
   ports:
